@@ -1,0 +1,26 @@
+[server]
+listen_port = 8888
+ssl_cert = /etc/ai-wuziqi/cert.pem
+ssl_key  = /etc/ai-wuziqi/key.pem
+max_connections = 10000
+
+[database]
+host = 127.0.0.1
+port = 3306
+user = wuziqi
+# 密码从环境变量读取，避免明文存储
+# export AI_WUZIQI_DB_PASSWORD=your_password
+password = ${AI_WUZIQI_DB_PASSWORD}
+dbname = ai_wuziqi
+
+[game]
+total_time_sec = 180
+step_time_sec  = 30
+
+[security]
+# 登录失败锁定次数
+login_max_attempts = 5
+# 锁定时间（分钟）
+lockout_duration_min = 15
+# API速率限制（每分钟）
+api_rate_limit = 60

@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="server_cert.fingerprint">server_cert.fingerprint</file>
+    </qresource>
+</RCC>
