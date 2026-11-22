@@ -137,6 +137,26 @@ void LoginWindow::onOfflineClicked()
     emit offlineGameRequested();
 }
 
+// 找回密码：请求验证码（由 controller 连接后驱动）
+// 注意：Flag 找回密码主流程在 FindPasswordDialog 内，这两个槽保留为
+// 窗口级快捷出口，供外部 connect 触发；提供实现以满足 Q_OBJECT 元对象链接。
+void LoginWindow::onVerifyCodeClicked()
+{
+    // 若有对话框，转发其邮箱；否则回显提示。实际验证码请求由对话框的
+    // verifyCodeRequested 信号发出，此槽作为窗口级兼容出口保留。
+    if (findPwdDialog_) {
+        emit verifyCodeRequested(QString());
+    } else {
+        showMessage(QStringLiteral("请先打开发现密码对话框"));
+    }
+}
+
+void LoginWindow::onSubmitResetClicked()
+{
+    // 兼容出口：重置流程由 FindPasswordDialog::resetPwdRequested 驱动。
+    emit resetPwdRequested(QString(), QString(), QString());
+}
+
 void LoginWindow::showMessage(const QString &msg)
 {
     statusLabel_->setText(msg);
