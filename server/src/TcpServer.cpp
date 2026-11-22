@@ -23,15 +23,6 @@
 
 namespace AIWZQ {
 
-static void setNonBlocking(int fd) {
-#ifdef __linux__
-    int flags = ::fcntl(fd, F_GETFL, 0);
-    if (flags >= 0) ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-    int one = 1;
-    ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-#endif
-}
-
 TcpServer::TcpServer(int port, int ioThreads)
     : port_(port), ioThreadCount_(std::max(1, ioThreads)),
       listenFd_(-1), running_(false), handler_(nullptr),
@@ -159,7 +150,7 @@ void TcpServer::acceptLoop() {
         size_t idx = static_cast<size_t>(cid) % loops_.size();
         EventLoop* loop = loops_[idx].get();
 
-        auto conn = std::make_shared<net::TcpConnection>(
+        auto conn = std::make_shared<TcpConnection>(
             fd, std::string(ip), cid, loop, handler_, tlsEnabled_ ? sslCtx_ : nullptr);
         IMessageHandler* h = handler_;
 

@@ -42,7 +42,6 @@
 #endif
 
 namespace AIWZQ {
-namespace net {
 
 // 简单连续字节缓冲，支持帧弹出与消费；inBuf_/outBuf_ 通用。
 class Buffer {
@@ -269,5 +268,4 @@ private:
     bool handshaked_;
 };
 
-} // namespace net
 } // namespace AIWZQ
