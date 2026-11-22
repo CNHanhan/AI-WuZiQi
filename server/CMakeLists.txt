@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(AIWZQ_Server LANGUAGES CXX)
 
 # ---------- 语言标准 ----------
-set(CMAKE_CXX_STANDARD 14)          # common/base 用 cxx_std_14；此处保持兼容
+set(CMAKE_CXX_STANDARD 17)          # 业务层使用 std::optional，需 C++17（common 的 cxx_std_14 向下兼容）
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 if(NOT CMAKE_BUILD_TYPE)

@@ -16,12 +16,9 @@
 #include <string>
 #include <vector>
 
-// mysql C API 的不完整前置声明：避免头文件依赖 <mysql/mysql.h>，
-// 使本机无 MySQL 开发头时本头文件仍可编译；实现文件才 include 真实头。
-struct st_mysql;
-struct st_mysql_stmt;
-typedef struct st_mysql MYSQL;
-typedef struct st_mysql_stmt MYSQL_STMT;
+// mysql C API 类型：直接使用系统头定义（MariaDB/MySQL 的 mysql.h 里
+// MYSQL/MYSQL_STMT 的 typedef 与手动前置声明会冲突，故不再自定义）。
+#include <mysql/mysql.h>
 
 namespace AIWZQ {
 

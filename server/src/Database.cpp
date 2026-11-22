@@ -190,7 +190,7 @@ bool fetchUserBy(MYSQL* conn, const char* sql, const std::string& key, bool byUi
         int32_t elo = 0, wins = 0, losses = 0, draws = 0, total = 0, status = 0;
         int32_t attempts = 0;
         unsigned long len_uname=0,len_hash=0,len_salt=0,len_email=0,len_avatar=0,len_reg=0,len_last=0,len_lock=0;
-        my_bool n_last=1, n_lock=1;
+        bool n_last=true, n_lock=true;
 
         MYSQL_BIND rb[16];
         std::memset(rb, 0, sizeof(rb));
@@ -392,7 +392,7 @@ bool Database::queryShopItems(std::vector<ShopItem>& items) {
         if(mysql_stmt_execute(stmt)) break;
         char name[96],desc[320],type[24],path[160];
         unsigned long lname=0,ldesc=0,ltype=0,lpath=0;
-        int64_t id=0; uint32_t price=0; my_bool hot=0;
+        int64_t id=0; uint32_t price=0; bool hot=false;
         MYSQL_BIND b[7]; std::memset(b,0,sizeof(b));
         b[0].buffer_type=MYSQL_TYPE_LONGLONG; b[0].buffer=&id;    b[0].buffer_length=sizeof(id); b[0].is_unsigned=1;
         b[1].buffer_type=MYSQL_TYPE_STRING;   b[1].buffer=name;   b[1].buffer_length=sizeof(name);   b[1].length=&lname;
@@ -433,7 +433,7 @@ bool Database::queryUserItems(int64_t uid, std::vector<UserItem>& items) {
         if(mysql_stmt_execute(stmt)) break;
         char name[96],type[24],path[160];
         unsigned long lname=0,ltype=0,lpath=0;
-        int64_t rowId=0,itemId=0; uint32_t price=0; my_bool eq=0;
+        int64_t rowId=0,itemId=0; uint32_t price=0; bool eq=false;
         MYSQL_BIND b[7]; std::memset(b,0,sizeof(b));
         b[0].buffer_type=MYSQL_TYPE_LONGLONG; b[0].buffer=&rowId;  b[0].buffer_length=sizeof(rowId);
         b[1].buffer_type=MYSQL_TYPE_LONGLONG; b[1].buffer=&itemId;  b[1].buffer_length=sizeof(itemId);
