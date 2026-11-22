@@ -60,7 +60,7 @@ void EventLoop::run() {
             uint32_t e = events[i].events;
             if (fd == wakeupFd_) {
                 uint64_t one = 0;
-                ::read(wakeupFd_, &one, sizeof(one));
+                (void)::read(wakeupFd_, &one, sizeof(one));
                 executeTasks();
                 continue;
             }

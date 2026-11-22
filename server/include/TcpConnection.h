@@ -44,7 +44,8 @@
 namespace AIWZQ {
 
 // 简单连续字节缓冲，支持帧弹出与消费；inBuf_/outBuf_ 通用。
-class Buffer {
+// 注意：改名 NetBuffer 避免与 common/Protocol.h 中的 AIWZQ::Buffer 重名。
+class NetBuffer {
 public:
     void append(const char* p, size_t n) { if (n) data_.append(p, n); }
     size_t size() const { return data_.size(); }
@@ -253,8 +254,8 @@ private:
     }
 
     int sockFd_;
-    Buffer inBuf_;
-    Buffer outBuf_;
+    NetBuffer inBuf_;
+    NetBuffer outBuf_;
     std::mutex outMutex_;
     bool writing_;                        // 仅 loop 线程访问
     std::atomic<bool> connected_;
