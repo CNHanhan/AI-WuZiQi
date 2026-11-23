@@ -79,6 +79,7 @@ public slots:
     void onLeaveRoomRequested();
     void onRoomWaitTimedOut();     // RoomWindow 等待对手 150 秒超时
     void onMatchWaitTimedOut();    // 随机匹配 30 秒超时
+    void onMatchPollTick();        // 随机匹配等待期间每 2 秒重发一次检查配对结果
 
     // 对局
     void onPlaceStoneRequested(int x, int y);
@@ -92,6 +93,7 @@ public slots:
     void onBuyItemRequested(qint64 itemId);
     void onEquipItemRequested(qint64 itemId);
     void onRequestShopList(const QString& type = QString());
+    void onRechargeRequested(qint64 amount);   // 充值：弹确认框，选"是"本地加金币
 
     // 网络
     void onMessageReceived(const QJsonObject& msg);
@@ -160,7 +162,8 @@ private:
     bool reconnectPending_ = false;
     QSet<QString> seenNonces_;
 
-    QTimer* matchWaitTimer_ = nullptr;  // 随机匹配等待对手的 30 秒超时定时器
+    QTimer* matchWaitTimer_ = nullptr;   // 随机匹配 30 秒总超时
+    QTimer* matchPollTimer_ = nullptr;   // 随机匹配等待期间的 2 秒轮询定时器
 
     TcpClient*     tcp_    = nullptr;
     AIManager*     ai_     = nullptr;

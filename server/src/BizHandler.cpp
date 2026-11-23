@@ -499,6 +499,11 @@ void BizHandler::handlePlaceStone(IConnection* c, const Message& m) {
         replyError(c, m, MsgType::PLACE_STONE_RESP, ErrCode::INVALID_PARAM, "坐标无效");
         return;
     }
+    // 关键：必须先取房间号/颜色再落子。placeStone 内部 finalize_ 会在对局结束时
+    // 清除 uidToRoom_ 映射，之后 roomOf(uid)/colorOf(uid) 会失效，
+    // 导致 game_over_notify 广播到房间 0（无人接收）。
+    const int color = rooms_.colorOf(uid);
+    const int64_t rid = rooms_.roomOf(uid);
     GameOverEvent over;
     StoneResult r = rooms_.placeStone(uid, x, y, &over);
     if (!r.ok) {
@@ -507,9 +512,6 @@ void BizHandler::handlePlaceStone(IConnection* c, const Message& m) {
         return;
     }
     reply(c, m, MsgType::PLACE_STONE_RESP, {{"code", ErrCode::OK}});
-    // 落子颜色由玩家在房间中的黑白身份决定
-    const int color = rooms_.colorOf(uid);
-    const int64_t rid = rooms_.roomOf(uid);
     json notify = {{"uid", uid}, {"x", x}, {"y", y}, {"color", color},
                    {"total_time_left", r.totalTimeLeft}, {"step_time_left", r.stepTimeLeft},
                    {"is_game_over", r.gameOver}};

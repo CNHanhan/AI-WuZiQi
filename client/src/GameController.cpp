@@ -83,6 +83,10 @@ GameController::GameController(QObject* parent)
     matchWaitTimer_->setSingleShot(true);
     matchWaitTimer_->setInterval(30 * 1000);
     connect(matchWaitTimer_, &QTimer::timeout, this, &GameController::onMatchWaitTimedOut);
+    // 匹配等待期间每 2 秒重发 random_join_req 检查是否有人配对
+    matchPollTimer_ = new QTimer(this);
+    matchPollTimer_->setInterval(2 * 1000);
+    connect(matchPollTimer_, &QTimer::timeout, this, &GameController::onMatchPollTick);
 
     connect(tcp_, &TcpClient::messageReceived, this, &GameController::onMessageReceived);
     connect(tcp_, &TcpClient::connected,       this, &GameController::onConnected);
@@ -142,6 +146,7 @@ void GameController::createWindows()
     connect(shopWindow_, &ShopWindow::buyItemRequested,   this, &GameController::onBuyItemRequested);
     connect(shopWindow_, &ShopWindow::equipItemRequested, this, &GameController::onEquipItemRequested);
     connect(shopWindow_, &ShopWindow::requestShopList,    this, &GameController::onRequestShopList);
+    connect(shopWindow_, &ShopWindow::rechargeRequested,  this, &GameController::onRechargeRequested);
 
     // ---- RankDialog ----
     connect(rankDialog_, &RankDialog::rankRequested, this, &GameController::onRankQueryRequested);
@@ -317,10 +322,18 @@ void GameController::onJoinRoomRequested(qint64 roomId, const QString& password)
 
 void GameController::onRandomMatchRequested()
 {
+    // 随机匹配：点击后进入匹配池，等待最多 30 秒看是否有人同时匹配。
     send(AIWZQ::MsgType::RANDOM_JOIN_REQ, QJsonObject());
-    // 启动 30 秒匹配等待超时；收到 room_info_resp（匹配成功）时停止
-    if (matchWaitTimer_)
-        matchWaitTimer_->start();
+    if (matchWaitTimer_) matchWaitTimer_->start();   // 30 秒总超时
+    if (matchPollTimer_) matchPollTimer_->start();   // 每 2 秒轮询配对结果
+    emit statusMessage(QStringLiteral("正在匹配对手，最多等待 30 秒..."));
+}
+
+void GameController::onMatchPollTick()
+{
+    // 每 2 秒重发一次 random_join_req：服务端匹配池会把等待者配对，
+    // 配对成功后该请求返回 room_id>0；仍在等待返回 0。
+    send(AIWZQ::MsgType::RANDOM_JOIN_REQ, QJsonObject());
 }
 
 void GameController::onChatRequested(const QString& content)
@@ -376,6 +389,7 @@ void GameController::onLeaveRoomRequested()
 {
     // 协议无专用离开房间请求：用 LOGOUT 之外的通用方式，回到大厅并刷新
     if (matchWaitTimer_) matchWaitTimer_->stop();
+    if (matchPollTimer_) matchPollTimer_->stop();
     if (roomWindow_) roomWindow_->stopWaitingTimeout();
     if (mainWindow_) mainWindow_->show();
     if (roomWindow_) roomWindow_->hide();
@@ -398,15 +412,15 @@ void GameController::onRoomWaitTimedOut()
 
 void GameController::onMatchWaitTimedOut()
 {
-    // 随机匹配 30 秒内未匹配到对手：仅在仍处于大厅/匹配等待态时生效
-    if (state_ != InLobby) {
-        if (matchWaitTimer_) matchWaitTimer_->stop();
-        return;
-    }
+    // 停止轮询 + 通知服务端把自己移出匹配池
+    if (matchWaitTimer_) matchWaitTimer_->stop();
+    if (matchPollTimer_) matchPollTimer_->stop();
+    // 匹配池条目由服务端 40 秒 TTL 自动清理，无需额外取消协议
+    // 随机匹配 30 秒未匹配到对手给出提示（仍处于大厅等待态时）
+    if (state_ != InLobby) return;
     emit statusMessage(QStringLiteral("匹配超时，已取消匹配"));
     QMessageBox::information(mainWindow_, QStringLiteral("匹配超时"),
                              QStringLiteral("30 秒内未匹配到对手，已取消匹配。"));
-    if (matchWaitTimer_) matchWaitTimer_->stop();
     if (roomWindow_) roomWindow_->hide();
     if (mainWindow_) mainWindow_->show();
     setState(InLobby);
@@ -481,6 +495,28 @@ void GameController::onEquipItemRequested(qint64 itemId)
     d.insert(QStringLiteral("item_id"), QJsonValue(itemId));
     d.insert(QStringLiteral("equipped"), true);
     send(AIWZQ::MsgType::EQUIP_ITEM_REQ, d);
+}
+
+void GameController::onRechargeRequested(qint64 amount)
+{
+    // 简单方案：不接真实支付、不写 DB，仅按爸爸要求"弹窗询问是否已充值"。
+    // 用户点"是"即本地给账户加金币并刷新商城显示，供离线/联机演示使用。
+    if (amount <= 0) return;
+    const QString prompt = QStringLiteral("请先在支付页面完成 %1 金币的充值。\n\n是否已完成充值？").arg(amount);
+    const auto answer = QMessageBox::question(
+        shopWindow_, QStringLiteral("充值确认"), prompt,
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (answer != QMessageBox::Yes) {
+        emit statusMessage(QStringLiteral("已取消充值"));
+        return;
+    }
+    userInfo_.coins += amount;
+    if (shopWindow_) shopWindow_->setCoins(userInfo_.coins);
+    // 同步大厅显示（金币），保持 UI 一致
+    if (mainWindow_)
+        mainWindow_->setUserInfo(QString::fromStdString(userInfo_.username),
+                                 userInfo_.eloScore, userInfo_.wins, userInfo_.coins);
+    emit statusMessage(QStringLiteral("充值成功，当前金币：%1").arg(userInfo_.coins));
 }
 
 // =============== 网络回调 ===============
@@ -722,10 +758,16 @@ void GameController::dispatchJoinRoomResp(const QJsonObject& data)
 
 void GameController::dispatchRoomInfoResp(const QJsonObject& data)
 {
-    // 收到房间信息（随机匹配成功或房间状态更新）：取消 30 秒匹配等待超时
+    const qint64 roomId = static_cast<qint64>(data.value(QStringLiteral("room_id")).toDouble());
+    // room_id=0 表示随机匹配"仍在等待池、尚未配对"：不停止轮询/超时，继续等
+    if (roomId <= 0) {
+        emit statusMessage(QStringLiteral("仍在等待对手，请稍候..."));
+        return;
+    }
+    // 匹配成功：停止 30 秒超时与 2 秒轮询
     if (matchWaitTimer_) matchWaitTimer_->stop();
-    if (data.contains(QStringLiteral("room_id")))
-        roomWindow_->setRoomId(static_cast<qint64>(data.value(QStringLiteral("room_id")).toDouble()));
+    if (matchPollTimer_) matchPollTimer_->stop();
+    roomWindow_->setRoomId(roomId);
     const QJsonObject self  = data.value(QStringLiteral("self")).toObject();
     const QJsonObject oppo  = data.value(QStringLiteral("opponent")).toObject();
     if (!self.isEmpty())
@@ -754,6 +796,7 @@ void GameController::dispatchGameStartNotify(const QJsonObject& data)
 {
     setState(InGame);
     if (matchWaitTimer_) matchWaitTimer_->stop();
+    if (matchPollTimer_) matchPollTimer_->stop();
     if (roomWindow_) { roomWindow_->stopWaitingTimeout(); roomWindow_->hide(); }
     centerAndShow(gameWindow_);
     myColor_   = data.value(QStringLiteral("my_color")).toInt();

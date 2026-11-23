@@ -46,7 +46,10 @@ public:
                        const std::string& password);
     // 返回 0 成功；非 0 为 ErrCode
     int joinRoom(int64_t roomId, int64_t uid, const std::string& password);
-    int64_t randomMatch(int64_t uid);     // 加入已有 waiting 房间或新建；返回 roomId
+    // 匹配池：配对成功返回 roomId>0；仅自己等待返回 0（客户端 30s 超时提示）
+    int64_t randomMatch(int64_t uid);
+    // 取消匹配：把 uid 从等待池移除（客户端超时/离开时调用）
+    void cancelMatch(int64_t uid);
     bool leaveRoom(int64_t uid);
 
     // ---- 对局操作 ----
@@ -79,10 +82,15 @@ public:
 
 private:
     std::shared_ptr<Room> findRoom_(int64_t roomId) const;
+    // 调用方已持有 mtx_ 时使用的建房实现（避免 randomMatch 持锁时死锁）
+    int64_t createRoomLocked_(int64_t ownerUid, int totalTimeSec, int stepTimeSec,
+                              const std::string& password);
     void finalize_(const std::shared_ptr<Room>& room, GameOverEvent& ev,
                    int winnerColor, GameEndReason reason, const std::string& reasonText);
     int kFactor_(int elo) const;
     void pushEvent_(const GameOverEvent& ev);
+    // 清理匹配池中超过 MATCH_POOL_TTL_SEC 秒的陈旧等待者（调用方须持有 mtx_）
+    void pruneMatchPool_();
 
     Database& db_;
     RedisClient& redis_;
@@ -90,6 +98,9 @@ private:
     std::map<int64_t, std::shared_ptr<Room>> rooms_;
     std::map<int64_t, int64_t> uidToRoom_;
     std::atomic<int64_t> nextRoomId_{1001};
+
+    // 随机匹配等待池：uid -> 入池时间戳（steady_clock 秒）
+    std::map<int64_t, int64_t> matchPool_;
 
     // 待确认请求：uid -> {roomId, targetUid}
     struct Pending { int64_t roomId; int64_t targetUid; };

@@ -168,6 +168,11 @@ void Room::finishSurrender(int64_t uid) {
     (void)uid; // 胜者在 RoomManager 依据认输方反推
 }
 
+void Room::finish() {
+    std::lock_guard<std::mutex> lk(mtx_);
+    status_ = RoomStatus::FINISHED;
+}
+
 void Room::reset() {
     std::lock_guard<std::mutex> lk(mtx_);
     status_ = RoomStatus::WAITING;

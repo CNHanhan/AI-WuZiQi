@@ -61,6 +61,8 @@ public:
     // 和棋 / 认输
     void finishDraw();
     void finishSurrender(int64_t uid);
+    // 统一结束对局：把状态置为 FINISHED（供 RoomManager::finalize_ 在所有结束路径调用）
+    void finish();
 
     // 重置到等待状态（对局结束后复用房间）
     void reset();

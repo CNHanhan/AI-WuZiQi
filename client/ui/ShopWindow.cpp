@@ -11,6 +11,7 @@
 #include <QComboBox>
 #include <QPixmap>
 #include <QMessageBox>
+#include <QInputDialog>
 #include <QFont>
 
 ShopWindow::ShopWindow(QWidget *parent)
@@ -26,8 +27,12 @@ void ShopWindow::setupUi()
 
     coinsLabel_ = new QLabel(QStringLiteral("金币：0"), central);
     refreshBtn_ = new QPushButton(QStringLiteral("刷新商品"), central);
+    rechargeBtn_ = new QPushButton(QStringLiteral("充值"), central);
+    rechargeBtn_->setStyleSheet(QStringLiteral(
+        "QPushButton{background:#e8a33d;color:#fff;font-weight:bold;border-radius:4px;padding:4px 14px;}"));
     QHBoxLayout *top = new QHBoxLayout;
     top->addWidget(coinsLabel_, 1);
+    top->addWidget(rechargeBtn_);
     top->addWidget(refreshBtn_);
 
     itemList_ = new QListWidget(central);
@@ -89,6 +94,7 @@ void ShopWindow::setupUi()
     connect(filterCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &ShopWindow::onFilterChanged);
     connect(refreshBtn_, &QPushButton::clicked, this, &ShopWindow::onRefreshClicked);
+    connect(rechargeBtn_, &QPushButton::clicked, this, &ShopWindow::onRechargeClicked);
 }
 
 // ---------- 数据回填 ----------
@@ -146,6 +152,12 @@ void ShopWindow::onCurrentItemChanged()
 
     if (!it.previewImage.isEmpty()) {
         QPixmap pm(it.previewImage);
+        // webp 兜底：部署若缺少 Qt webp 图像插件，同名 .webp 会加载失败，
+        // 此时改用我们一并打入 qrc 的同名 .png（生成脚本对两张特效图都出了 png）。
+        if (pm.isNull() && it.previewImage.endsWith(QStringLiteral(".webp"), Qt::CaseInsensitive)) {
+            const QString pngPath = it.previewImage.left(it.previewImage.size() - 5) + QStringLiteral(".png");
+            pm.load(pngPath);
+        }
         if (!pm.isNull())
             previewLabel_->setPixmap(pm.scaled(previewLabel_->size(),
                                                Qt::KeepAspectRatio, Qt::SmoothTransformation));
@@ -185,4 +197,34 @@ void ShopWindow::onFilterChanged(int)
 void ShopWindow::onRefreshClicked()
 {
     emit requestShopList(filterCombo_->currentData().toString());
+}
+
+void ShopWindow::onRechargeClicked()
+{
+    // 本地演示：选档位或输入自定义金额，发出信号由 GameController 弹"是否已充值"确认后加金币。
+    QStringList tiers;
+    tiers << QStringLiteral("100 金币") << QStringLiteral("500 金币")
+          << QStringLiteral("1000 金币") << QStringLiteral("5000 金币")
+          << QStringLiteral("自定义金额...");
+    bool ok = false;
+    const QString picked = QInputDialog::getItem(
+        this, QStringLiteral("充值"), QStringLiteral("选择充值档位："),
+        tiers, 0, false, &ok);
+    if (!ok || picked.isEmpty())
+        return;
+
+    qint64 amount = 0;
+    if (picked == QStringLiteral("自定义金额...")) {
+        amount = static_cast<qint64>(QInputDialog::getInt(
+            this, QStringLiteral("充值"), QStringLiteral("输入充值金币数："),
+            100, 1, 1000000, 100, &ok));
+        if (!ok || amount <= 0)
+            return;
+    } else {
+        // 从档位字符串头部分离数字
+        amount = picked.section(QStringLiteral(" "), 0, 0).toLongLong();
+        if (amount <= 0)
+            return;
+    }
+    emit rechargeRequested(amount);
 }

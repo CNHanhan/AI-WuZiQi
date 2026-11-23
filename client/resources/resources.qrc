@@ -1,5 +1,24 @@
 <RCC>
     <qresource prefix="/">
         <file alias="server_cert.fingerprint">server_cert.fingerprint</file>
+
+        <!-- 商城商品预览图：别名与 DB t_shop_item.resource_path 的 :/res/... 对齐 -->
+        <!-- 棋盘 -->
+        <file alias="res/board/classic.png">res/board/classic.png</file>
+        <file alias="res/board/glass.png">res/board/glass.png</file>
+        <file alias="res/board/galaxy.png">res/board/galaxy.png</file>
+        <!-- 棋子 -->
+        <file alias="res/stone/glass.png">res/stone/glass.png</file>
+        <file alias="res/stone/agate.png">res/stone/agate.png</file>
+        <file alias="res/stone/jade.png">res/stone/jade.png</file>
+        <!-- 特效（webp + png 兜底；Qt 部署若无 webp 插件会走同名 png） -->
+        <file alias="res/effect/glow.webp">res/effect/glow.webp</file>
+        <file alias="res/effect/glow.png">res/effect/glow.png</file>
+        <file alias="res/effect/firework.webp">res/effect/firework.webp</file>
+        <file alias="res/effect/firework.png">res/effect/firework.png</file>
+        <!-- 头像 -->
+        <file alias="res/avatar/default.png">res/avatar/default.png</file>
+        <file alias="res/avatar/coldcoffee.png">res/avatar/coldcoffee.png</file>
+        <file alias="res/avatar/fujiang.png">res/avatar/fujiang.png</file>
     </qresource>
 </RCC>

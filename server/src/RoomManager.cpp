@@ -7,12 +7,16 @@
 #include "Database.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <sstream>
 
 namespace AIWZQ {
 
 namespace {
+
+// 匹配池等待超时（秒）：超过此时长未被配对的等待者会被自动清理
+constexpr int64_t MATCH_POOL_TTL_SEC = 40;
 
 // 把 snapshot kv 数组转成 json
 json snapshotToJson(const std::vector<std::pair<std::string, std::string>>& kv) {
@@ -80,22 +84,27 @@ void RoomManager::listRooms(int page, int pageSize, json& outRooms, int& total) 
         outRooms.push_back(all[i].second);
 }
 
-int64_t RoomManager::createRoom(int64_t ownerUid, int totalTimeSec, int stepTimeSec,
-                                const std::string& password) {
+int64_t RoomManager::createRoomLocked_(int64_t ownerUid, int totalTimeSec, int stepTimeSec,
+                                       const std::string& password) {
     if (totalTimeSec <= 0) totalTimeSec = Config::instance().game().totalTimeSec;
     if (stepTimeSec <= 0) stepTimeSec = Config::instance().game().stepTimeSec;
     const int64_t id = nextRoomId_.fetch_add(1);
     auto room = std::make_shared<Room>(id, totalTimeSec, stepTimeSec, password);
     room->onPlayerJoin(ownerUid);
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        rooms_[id] = room;
-        uidToRoom_[ownerUid] = id;
-    }
+    rooms_[id] = room;
+    uidToRoom_[ownerUid] = id;
     // 同步房间状态到 Redis hash
     for (const auto& kv : room->snapshot())
         redis_.hset(redis_.roomKey(id), kv.first, kv.second);
     return id;
+}
+
+int64_t RoomManager::createRoom(int64_t ownerUid, int totalTimeSec, int stepTimeSec,
+                                const std::string& password) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    // 创建房间时顺手清理过期匹配项，避免陈旧 uid 干扰
+    pruneMatchPool_();
+    return createRoomLocked_(ownerUid, totalTimeSec, stepTimeSec, password);
 }
 
 int RoomManager::joinRoom(int64_t roomId, int64_t uid, const std::string& password) {
@@ -113,20 +122,56 @@ int RoomManager::joinRoom(int64_t roomId, int64_t uid, const std::string& passwo
     return ErrCode::OK;
 }
 
-int64_t RoomManager::randomMatch(int64_t uid) {
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        for (const auto& kv : rooms_) {
-            auto r = kv.second;
-            if (r->status() == RoomStatus::WAITING && r->isFull() == false && r->ownerUid() != uid) {
-                if (r->onPlayerJoin(uid)) {
-                    uidToRoom_[uid] = kv.first;
-                    return kv.first;
-                }
-            }
-        }
+void RoomManager::pruneMatchPool_() {
+    const int64_t now = static_cast<int64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+    for (auto it = matchPool_.begin(); it != matchPool_.end(); ) {
+        if (now - it->second > MATCH_POOL_TTL_SEC) it = matchPool_.erase(it);
+        else ++it;
     }
-    return createRoom(uid, 0, 0, "");
+}
+
+void RoomManager::cancelMatch(int64_t uid) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    matchPool_.erase(uid);
+}
+
+int64_t RoomManager::randomMatch(int64_t uid) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    pruneMatchPool_();
+
+    // 已在池中（重复点击）：若已有房间则返回房间号，否则维持等待返回 0
+    auto self = matchPool_.find(uid);
+    if (self != matchPool_.end()) {
+        auto existing = uidToRoom_.find(uid);
+        if (existing != uidToRoom_.end()) return existing->second;
+        return 0;
+    }
+
+    // 找另一个等待者配对（跳过自己，优先最久等待者）
+    for (const auto& kv : matchPool_) {
+        if (kv.first == uid) continue;
+        const int64_t other = kv.first;
+        const int64_t roomId = createRoomLocked_(other, 0, 0, "");
+        auto room = findRoom_(roomId);
+        if (room && room->onPlayerJoin(uid)) {
+            uidToRoom_[uid] = roomId;
+            // 白方入房后同步快照，保证 Redis hash 中 white_uid 正确（与 joinRoom 一致）
+            for (const auto& kv : room->snapshot())
+                redis_.hset(redis_.roomKey(roomId), kv.first, kv.second);
+        }
+        matchPool_.erase(uid);   // 兜底：无论上面是否成功都清掉自己
+        matchPool_.erase(other); // 对方已入新房，移出等待池
+        return roomId;
+    }
+
+    // 只有自己：入池等待，返回 0 表示"等待中，未匹配"
+    const int64_t now = static_cast<int64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+    matchPool_[uid] = now;
+    return 0;
 }
 
 bool RoomManager::leaveRoom(int64_t uid) {
@@ -222,6 +267,16 @@ void RoomManager::finalize_(const std::shared_ptr<Room>& room, GameOverEvent& ev
     rec.movesJson = room->movesJson();
     db_.insertGameRecord(rec);
 
+    // 统一把内存中的房间置为 FINISHED，并解除双方 uid 映射，
+    // 否则和棋等路径 status 仍是 PLAYING，会残留在房间列表中。
+    room->finish();
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        uidToRoom_.erase(ev.blackUid);
+        uidToRoom_.erase(ev.whiteUid);
+        matchPool_.erase(ev.blackUid);
+        matchPool_.erase(ev.whiteUid);
+    }
     redis_.hset(redis_.roomKey(room->roomId()), "status", "finished");
     pushEvent_(ev);
 }

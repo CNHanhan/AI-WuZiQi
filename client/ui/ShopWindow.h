@@ -39,6 +39,7 @@ signals:
     void buyItemRequested(qint64 itemId);
     void equipItemRequested(qint64 itemId);
     void requestShopList(const QString &type = QString());
+    void rechargeRequested(qint64 amount);   // 充值请求（金额，由 GameController 弹确认后本地加金币）
 
 private slots:
     void onCurrentItemChanged();
@@ -46,6 +47,7 @@ private slots:
     void onEquipClicked();
     void onFilterChanged(int index);
     void onRefreshClicked();
+    void onRechargeClicked();
 
 private:
     void setupUi();
@@ -61,6 +63,7 @@ private:
     QPushButton *buyBtn_;
     QPushButton *equipBtn_;
     QPushButton *refreshBtn_;
+    QPushButton *rechargeBtn_;
     QComboBox *filterCombo_;
 
     QVector<ShopItemInfo> items_;
