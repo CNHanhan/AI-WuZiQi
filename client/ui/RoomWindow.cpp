@@ -15,10 +15,16 @@
 RoomWindow::RoomWindow(QWidget *parent)
     : QMainWindow(parent)
     , countdownTimer_(new QTimer(this))
+    , waitTimer_(new QTimer(this))
 {
     setupUi();
     countdownTimer_->setInterval(1000);
     connect(countdownTimer_, &QTimer::timeout, this, &RoomWindow::onCountdownTick);
+
+    // 等待对手的 150 秒超时定时器：单次触发，独立于对局开始倒计时
+    waitTimer_->setSingleShot(true);
+    waitTimer_->setInterval(150 * 1000);
+    connect(waitTimer_, &QTimer::timeout, this, &RoomWindow::onWaitTimeout);
 }
 
 void RoomWindow::setupUi()
@@ -88,6 +94,9 @@ void RoomWindow::setSelfPlayer(const QString &name, int elo)
 void RoomWindow::setOpponentPlayer(const QString &name, int elo)
 {
     opponentInfoLabel_->setText(QStringLiteral("%1  [ELO %2]").arg(name).arg(elo));
+    opponentPresent_ = true;
+    // 对手已加入，取消“等待对手”的 150 秒超时
+    stopWaitingTimeout();
 }
 
 void RoomWindow::setSelfReady(bool ready)
@@ -109,8 +118,11 @@ void RoomWindow::setOpponentReady(bool ready)
 void RoomWindow::clearOpponent()
 {
     opponentInfoLabel_->setText(QStringLiteral("等待对手加入..."));
+    opponentPresent_ = false;
     setOpponentReady(false);
     cancelCountdown();
+    // 没有对手 = 仍在等待，开始 150 秒等待超时计时
+    startWaitingTimeout();
 }
 
 void RoomWindow::startCountdown(int seconds)
@@ -130,6 +142,18 @@ void RoomWindow::cancelCountdown()
     countdownTimer_->stop();
     remainingSeconds_ = 0;
     countdownLabel_->clear();
+}
+
+void RoomWindow::startWaitingTimeout()
+{
+    // 仅在确实没有对手时才计时，避免对手已到位却误超时
+    if (!opponentPresent_ && !waitTimer_->isActive())
+        waitTimer_->start();
+}
+
+void RoomWindow::stopWaitingTimeout()
+{
+    waitTimer_->stop();
 }
 
 // ---------- 槽 ----------
@@ -153,6 +177,12 @@ void RoomWindow::onCountdownTick()
         return;
     }
     countdownLabel_->setText(QStringLiteral("对局开始倒计时：%1 秒").arg(remainingSeconds_));
+}
+
+void RoomWindow::onWaitTimeout()
+{
+    waitTimer_->stop();
+    emit waitTimedOut();
 }
 
 void RoomWindow::updateStatus()

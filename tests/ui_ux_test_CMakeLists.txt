@@ -1,0 +1,21 @@
+cmake_minimum_required(VERSION 3.16)
+project(UIUXTest LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_AUTOMOC ON)
+find_package(Qt5 REQUIRED COMPONENTS Core Gui Widgets Test)
+include_directories(${CMAKE_SOURCE_DIR}/../client/ui ${CMAKE_SOURCE_DIR}/../common/include)
+add_executable(ui_ux_test
+    ui_ux_test.cpp
+    ${CMAKE_SOURCE_DIR}/../client/ui/LoginWindow.cpp
+    ${CMAKE_SOURCE_DIR}/../client/ui/LoginWindow.h
+    ${CMAKE_SOURCE_DIR}/../client/ui/MainWindow.cpp
+    ${CMAKE_SOURCE_DIR}/../client/ui/MainWindow.h
+    ${CMAKE_SOURCE_DIR}/../client/ui/GameWindow.cpp
+    ${CMAKE_SOURCE_DIR}/../client/ui/GameWindow.h
+    ${CMAKE_SOURCE_DIR}/../client/ui/GomokuBoardWidget.cpp
+    ${CMAKE_SOURCE_DIR}/../client/ui/GomokuBoardWidget.h
+)
+target_link_libraries(ui_ux_test PRIVATE Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Test)
+if(WIN32)
+    target_link_libraries(ui_ux_test PRIVATE imm32)
+endif()

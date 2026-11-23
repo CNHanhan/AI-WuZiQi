@@ -16,6 +16,7 @@ class QLabel;
 class QPushButton;
 class QProgressBar;
 class QTimer;
+class QResizeEvent;
 
 class GameWindow : public QMainWindow
 {
@@ -45,6 +46,10 @@ public:
     // 请求结果提示（例如对方拒绝悔棋）
     void showMessage(const QString &msg);
 
+    // 对局结束查询：玩家是否获胜（winnerColor == 自己的颜色）。
+    // winnerColor 为 0（和棋/无胜方）时返回 false。
+    bool isPlayerWinner(int winnerColor) const;
+
 signals:
     void placeStoneRequested(int x, int y);
     void undoRequested();
@@ -64,6 +69,8 @@ private:
     void setupUi();
     void refreshInfoLabels();
     QString colorName(int color) const;
+    void showResultOverlay(const QString &text);          // 在棋盘上显示结果覆盖层
+    void resizeEvent(QResizeEvent *event) override;        // 覆盖层随棋盘尺寸变化重新居中
 
     GomokuBoardWidget *boardWidget_;
     QLabel *blackInfoLabel_;
@@ -72,6 +79,7 @@ private:
     QProgressBar *whiteTimeBar_;
     QLabel *stepTimerLabel_;
     QLabel *statusLabel_;
+    QLabel *resultOverlay_;              // 对局结束覆盖在棋盘上的结果标签
     QPushButton *undoBtn_;
     QPushButton *drawBtn_;
     QPushButton *surrenderBtn_;

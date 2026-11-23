@@ -21,6 +21,9 @@
 #include <QDateTime>
 #include <QApplication>
 #include <QScreen>
+#include <QTimer>
+#include <QTimer>
+#include <QMessageBox>
 
 namespace {
 // 把窗口居中显示（QMainWindow 自身无居中逻辑）
@@ -36,6 +39,18 @@ void centerAndShow(QWidget* w)
     w->raise();
     w->activateWindow();
 }
+
+// 仅设置初始居中位置，不 show：避免窗口首次显示前停在屏幕边角，
+// show/切换时仍由 centerAndShow 负责最终居中。
+void placeWindowCentered(QWidget* w)
+{
+    if (!w) return;
+    if (QScreen* screen = QGuiApplication::primaryScreen()) {
+        const QRect avail = screen->availableGeometry();
+        const QRect frame = w->frameGeometry().isEmpty() ? w->geometry() : w->frameGeometry();
+        w->move(avail.center() - frame.center());
+    }
+}
 } // namespace
 
 GameController::GameController(QObject* parent)
@@ -45,6 +60,12 @@ GameController::GameController(QObject* parent)
     crypto_ = new CryptoManager(this);
     tcp_    = new TcpClient(this);
     ai_     = new AIManager(this);
+
+    // 随机匹配等待对手 30 秒超时定时器（单次触发）
+    matchWaitTimer_ = new QTimer(this);
+    matchWaitTimer_->setSingleShot(true);
+    matchWaitTimer_->setInterval(30 * 1000);
+    connect(matchWaitTimer_, &QTimer::timeout, this, &GameController::onMatchWaitTimedOut);
 
     connect(tcp_, &TcpClient::messageReceived, this, &GameController::onMessageReceived);
     connect(tcp_, &TcpClient::connected,       this, &GameController::onConnected);
@@ -90,6 +111,7 @@ void GameController::createWindows()
     // ---- RoomWindow ----
     connect(roomWindow_, &RoomWindow::readyRequested,    this, &GameController::onReadyRequested);
     connect(roomWindow_, &RoomWindow::leaveRoomRequested,this, &GameController::onLeaveRoomRequested);
+    connect(roomWindow_, &RoomWindow::waitTimedOut,      this, &GameController::onRoomWaitTimedOut);
 
     // ---- GameWindow ----
     connect(gameWindow_, &GameWindow::placeStoneRequested,this, &GameController::onPlaceStoneRequested);
@@ -106,6 +128,14 @@ void GameController::createWindows()
 
     // ---- RankDialog ----
     connect(rankDialog_, &RankDialog::rankRequested, this, &GameController::onRankQueryRequested);
+
+    // ---- 初始居中：仅 move 不 show，避免首次显示前闪现在边角 ----
+    placeWindowCentered(loginWindow_);
+    placeWindowCentered(mainWindow_);
+    placeWindowCentered(roomWindow_);
+    placeWindowCentered(gameWindow_);
+    placeWindowCentered(shopWindow_);
+    placeWindowCentered(rankDialog_);
 }
 
 void GameController::showAllWindows() { centerAndShow(loginWindow_); }
@@ -271,6 +301,9 @@ void GameController::onJoinRoomRequested(qint64 roomId, const QString& password)
 void GameController::onRandomMatchRequested()
 {
     send(AIWZQ::MsgType::RANDOM_JOIN_REQ, QJsonObject());
+    // 启动 30 秒匹配等待超时；收到 room_info_resp（匹配成功）时停止
+    if (matchWaitTimer_)
+        matchWaitTimer_->start();
 }
 
 void GameController::onChatRequested(const QString& content)
@@ -325,8 +358,40 @@ void GameController::onReadyRequested(bool ready)
 void GameController::onLeaveRoomRequested()
 {
     // 协议无专用离开房间请求：用 LOGOUT 之外的通用方式，回到大厅并刷新
+    if (matchWaitTimer_) matchWaitTimer_->stop();
+    if (roomWindow_) roomWindow_->stopWaitingTimeout();
     if (mainWindow_) mainWindow_->show();
     if (roomWindow_) roomWindow_->hide();
+    setState(InLobby);
+    requestRoomList();
+}
+
+void GameController::onRoomWaitTimedOut()
+{
+    // 房间等待对手超过 150 秒：提示并退回大厅
+    emit statusMessage(QStringLiteral("房间等待超时，已返回大厅"));
+    QMessageBox::information(roomWindow_, QStringLiteral("房间等待超时"),
+                             QStringLiteral("等待对手超过 2.5 分钟，房间已解散，返回大厅。"));
+    if (matchWaitTimer_) matchWaitTimer_->stop();
+    if (roomWindow_) roomWindow_->hide();
+    if (mainWindow_) mainWindow_->show();
+    setState(InLobby);
+    requestRoomList();
+}
+
+void GameController::onMatchWaitTimedOut()
+{
+    // 随机匹配 30 秒内未匹配到对手：仅在仍处于大厅/匹配等待态时生效
+    if (state_ != InLobby) {
+        if (matchWaitTimer_) matchWaitTimer_->stop();
+        return;
+    }
+    emit statusMessage(QStringLiteral("匹配超时，已取消匹配"));
+    QMessageBox::information(mainWindow_, QStringLiteral("匹配超时"),
+                             QStringLiteral("30 秒内未匹配到对手，已取消匹配。"));
+    if (matchWaitTimer_) matchWaitTimer_->stop();
+    if (roomWindow_) roomWindow_->hide();
+    if (mainWindow_) mainWindow_->show();
     setState(InLobby);
     requestRoomList();
 }
@@ -617,6 +682,8 @@ void GameController::dispatchCreateRoomResp(const QJsonObject& data)
         setState(InRoom);
         if (mainWindow_) mainWindow_->hide();
         centerAndShow(roomWindow_);
+        // 创建房间后开始等待对手的 150 秒超时
+        roomWindow_->startWaitingTimeout();
     } else {
         emit statusMessage(data.value(QStringLiteral("message")).toString());
     }
@@ -629,6 +696,8 @@ void GameController::dispatchJoinRoomResp(const QJsonObject& data)
         setState(InRoom);
         if (mainWindow_) mainWindow_->hide();
         centerAndShow(roomWindow_);
+        // 加入房间后开始等待对手的 150 秒超时（若对手已在则随后 setOpponentPlayer 会停掉）
+        roomWindow_->startWaitingTimeout();
     } else {
         emit statusMessage(data.value(QStringLiteral("message")).toString());
     }
@@ -636,6 +705,8 @@ void GameController::dispatchJoinRoomResp(const QJsonObject& data)
 
 void GameController::dispatchRoomInfoResp(const QJsonObject& data)
 {
+    // 收到房间信息（随机匹配成功或房间状态更新）：取消 30 秒匹配等待超时
+    if (matchWaitTimer_) matchWaitTimer_->stop();
     if (data.contains(QStringLiteral("room_id")))
         roomWindow_->setRoomId(static_cast<qint64>(data.value(QStringLiteral("room_id")).toDouble()));
     const QJsonObject self  = data.value(QStringLiteral("self")).toObject();
@@ -665,7 +736,8 @@ void GameController::dispatchReadyResp(const QJsonObject& data)
 void GameController::dispatchGameStartNotify(const QJsonObject& data)
 {
     setState(InGame);
-    if (roomWindow_) roomWindow_->hide();
+    if (matchWaitTimer_) matchWaitTimer_->stop();
+    if (roomWindow_) { roomWindow_->stopWaitingTimeout(); roomWindow_->hide(); }
     centerAndShow(gameWindow_);
     myColor_   = data.value(QStringLiteral("my_color")).toInt();
     blackLeft_ = data.value(QStringLiteral("total_time_black")).toInt();
@@ -737,10 +809,14 @@ void GameController::dispatchGameOverNotify(const QJsonObject& data)
         detail = (winnerUid == userInfo_.uid) ? QStringLiteral("你赢了！") : QStringLiteral("你输了");
     }
     gameWindow_->endGame(winnerColor, reason, detail);
+    // 不再立即隐藏对局窗口：先让棋盘上的结果覆盖层停留 2.5 秒，
+    // 给爸爸时间看清"胜利/鼓励"，再延时切回大厅。
     setState(InLobby);
-    if (gameWindow_) gameWindow_->hide();
-    centerAndShow(mainWindow_);
-    requestRoomList();
+    QTimer::singleShot(2500, this, [this]() {
+        if (gameWindow_) gameWindow_->hide();
+        centerAndShow(mainWindow_);
+        requestRoomList();
+    });
 }
 
 void GameController::dispatchTimeoutNotify(const QJsonObject& data)

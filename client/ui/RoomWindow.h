@@ -30,14 +30,21 @@ public:
     void startCountdown(int seconds);
     void cancelCountdown();
 
+    // 等待对手超时（2.5 分钟）：进入房间/重新等待对手时启动，对手到来或对局开始时停止
+    void startWaitingTimeout();
+    void stopWaitingTimeout();
+    bool hasOpponent() const { return opponentPresent_; }
+
 signals:
     void readyRequested(bool ready);
     void leaveRoomRequested();
+    void waitTimedOut();   // 等待对手超过 150 秒，请求 controller 提示并返回大厅
 
 private slots:
     void onReadyToggled(bool checked);
     void onLeaveClicked();
     void onCountdownTick();
+    void onWaitTimeout();
 
 private:
     void setupUi();
@@ -52,9 +59,11 @@ private:
     QCheckBox *readyCheck_;
     QPushButton *leaveBtn_;
     QTimer    *countdownTimer_;
+    QTimer    *waitTimer_;
 
     qint64 roomId_ = 0;
     int    remainingSeconds_ = 0;
     bool   selfReady_ = false;
     bool   opponentReady_ = false;
+    bool   opponentPresent_ = false;
 };

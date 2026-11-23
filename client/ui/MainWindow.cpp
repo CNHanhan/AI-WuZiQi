@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include <QShowEvent>
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -25,6 +26,18 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     setupUi();
+}
+
+void MainWindow::showEvent(QShowEvent* event)
+{
+    QMainWindow::showEvent(event);
+    // 与 LoginWindow 同样的焦点问题：窗口未激活时首次点击聊天框只激活窗口、
+    // 不聚焦 QLineEdit，中文输入法态下表现为"吞键/打不进字"。
+    // 这里主动激活并把焦点交给聊天输入框；不禁用 IME，保留中文聊天能力。
+    activateWindow();
+    raise();
+    if (chatInput_)
+        chatInput_->setFocus(Qt::ActiveWindowFocusReason);
 }
 
 void MainWindow::setupUi()

@@ -21,6 +21,7 @@ class TcpClient;
 class AIManager;
 class CryptoManager;
 class SecureStorage;
+class QTimer;
 
 class LoginWindow;
 class MainWindow;
@@ -76,6 +77,8 @@ public slots:
     // 房间
     void onReadyRequested(bool ready);
     void onLeaveRoomRequested();
+    void onRoomWaitTimedOut();     // RoomWindow 等待对手 150 秒超时
+    void onMatchWaitTimedOut();    // 随机匹配 30 秒超时
 
     // 对局
     void onPlaceStoneRequested(int x, int y);
@@ -156,6 +159,8 @@ private:
     QByteArray sessionKey_;
     bool reconnectPending_ = false;
     QSet<QString> seenNonces_;
+
+    QTimer* matchWaitTimer_ = nullptr;  // 随机匹配等待对手的 30 秒超时定时器
 
     TcpClient*     tcp_    = nullptr;
     AIManager*     ai_     = nullptr;

@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <QMessageBox>
 #include <QFont>
+#include <QResizeEvent>
 
 GameWindow::GameWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -43,6 +44,18 @@ void GameWindow::setupUi()
     whiteTimeBar_->setValue(180);
     stepTimerLabel_ = new QLabel(QStringLiteral("每步：--"), central);
     statusLabel_ = new QLabel(QStringLiteral(""), central);
+
+    // 对局结束结果覆盖层：默认隐藏，结束时盖在棋盘中央显示胜负。
+    // 父对象为 central，与棋盘同级；用图形效果实现半透明底板。
+    resultOverlay_ = new QLabel(central);
+    resultOverlay_->setObjectName(QStringLiteral("resultOverlay"));
+    resultOverlay_->setAlignment(Qt::AlignCenter);
+    resultOverlay_->setVisible(false);
+    resultOverlay_->setStyleSheet(
+        QStringLiteral("QLabel { background-color: rgba(20, 20, 20, 190); "
+                       "color: #ffffff; border-radius: 12px; "
+                       "font-size: 28px; font-weight: bold; padding: 20px; }"));
+    resultOverlay_->raise();   // 保证盖在棋盘之上
 
     undoBtn_ = new QPushButton(QStringLiteral("悔棋"), central);
     drawBtn_ = new QPushButton(QStringLiteral("和棋"), central);
@@ -93,6 +106,10 @@ void GameWindow::startGame(int myColor,
     whiteTotalLeft_ = totalTimeSec;
     stepTimeLeft_ = stepTimeSec;
     gameOver_ = false;
+
+    // 新对局开始：清掉上一局残留的结果覆盖层
+    if (resultOverlay_)
+        resultOverlay_->setVisible(false);
 
     blackTimeBar_->setRange(0, totalMax_);
     whiteTimeBar_->setRange(0, totalMax_);
@@ -186,12 +203,29 @@ void GameWindow::endGame(int winnerColor, const QString &reason, const QString &
     if (!detail.isEmpty())
         msg += QStringLiteral(" — %1").arg(detail);
     statusLabel_->setText(msg);
-    showMessage(msg);
+
+    // 在棋盘中央弹出温和的结果覆盖层，让爸爸有时间看清胜负。
+    QString banner;
+    if (winnerColor == AIWZQ::Color::EMPTY) {
+        banner = QStringLiteral("🤝 和棋，再来一局！");
+    } else if (winnerColor == myColor_) {
+        banner = QStringLiteral("🎉 胜利！恭喜爸爸！");
+    } else {
+        banner = QStringLiteral("💪 别灰心，再来一局！");
+    }
+    showResultOverlay(banner);
 }
 
 void GameWindow::showMessage(const QString &msg)
 {
     statusLabel_->setText(msg);
+}
+
+bool GameWindow::isPlayerWinner(int winnerColor) const
+{
+    if (winnerColor == AIWZQ::Color::EMPTY)
+        return false;                       // 和棋/无胜方
+    return winnerColor == myColor_;
 }
 
 // ---------- 槽 ----------
@@ -250,4 +284,31 @@ void GameWindow::refreshInfoLabels()
 QString GameWindow::colorName(int color) const
 {
     return (color == AIWZQ::Color::BLACK) ? QStringLiteral("黑方") : QStringLiteral("白方");
+}
+
+void GameWindow::showResultOverlay(const QString &text)
+{
+    if (!resultOverlay_)
+        return;
+    resultOverlay_->setText(text);
+    // 覆盖层定位到棋盘控件中央区域（中央控件坐标系）。
+    // boardWidget_ 是 central 的直接子控件，映射到 central 坐标后居中覆盖。
+    if (boardWidget_) {
+        QRect r = boardWidget_->geometry();
+        const int w = qMin(r.width() - 20, 360);
+        const int h = 120;
+        resultOverlay_->setGeometry(r.center().x() - w / 2,
+                                    r.center().y() - h / 2,
+                                    qMax(w, 120), h);
+    }
+    resultOverlay_->raise();
+    resultOverlay_->setVisible(true);
+}
+
+void GameWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+    // 窗口尺寸变化时，若覆盖层正处于显示状态，重新按棋盘位置居中。
+    if (resultOverlay_ && resultOverlay_->isVisible())
+        showResultOverlay(resultOverlay_->text());
 }
