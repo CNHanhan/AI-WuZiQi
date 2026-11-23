@@ -139,10 +139,10 @@ void GameController::send(const QString& type, const QJsonObject& data)
 
 void GameController::sendSensitive(const QString& type, QJsonObject data)
 {
-    if (data.contains(QStringLiteral("password"))) {
-        const QString plain = data.value(QStringLiteral("password")).toString();
-        data.insert(QStringLiteral("password"), CryptoManager::hashPassword(plain));
-    }
+    // 密码以明文传输（TLS 1.3 链路已加密），由服务端统一做 Argon2id 哈希与校验。
+    // 之前客户端先哈希再传、服务端又哈希+校验格式，导致哈希串含 '$' 等字符
+    // 通不过服务端 validatePassword，注册/登录永远"输入参数无效"。
+    // 注意：不要在这里对 password 做任何哈希。
     AIWZQ::Message m = codec_->build(type, data);
     if (sessionKey_.size() == 32) {
         const QByteArray plain = QJsonDocument(codec_->toQJson(m)).toJson(QJsonDocument::Compact);
