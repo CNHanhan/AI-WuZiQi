@@ -26,30 +26,47 @@
 #include <QMessageBox>
 
 namespace {
-// 把窗口居中显示（QMainWindow 自身无居中逻辑）
+// 把窗口移动到屏幕正中央。
+// 用 Qt 标准写法：目标左上角 = 屏幕可用区中心 - 窗口 frame 尺寸的一半。
+// frameGeometry 含标题栏/边框；show 之后再取才准确，故 centerAndShow 里
+// 先 show + processEvents，再调用它。
+static void doCenter(QWidget* w)
+{
+    if (!w) return;
+    QScreen* screen = w->screen() ? w->screen() : QGuiApplication::primaryScreen();
+    if (!screen) return;
+    const QRect avail = screen->availableGeometry();
+    const QRect frame = w->frameGeometry();
+    const int fw = frame.isEmpty() ? w->width() : frame.width();
+    const int fh = frame.isEmpty() ? w->height() : frame.height();
+    w->move(avail.center().x() - fw / 2, avail.center().y() - fh / 2);
+}
+
 void centerAndShow(QWidget* w)
 {
     if (!w) return;
-    if (QScreen* screen = QGuiApplication::primaryScreen()) {
-        const QRect avail = screen->availableGeometry();
-        const QRect frame = w->frameGeometry().isEmpty() ? w->geometry() : w->frameGeometry();
-        w->move(avail.center() - frame.center());
-    }
     w->show();
     w->raise();
     w->activateWindow();
+    QCoreApplication::processEvents(); // 让窗口完成 show、拿到真实 frameGeometry
+    doCenter(w);
+    // 事件循环真正跑起来后再居中一次，规避首次显示高 DPI/布局尚未就绪的偏差
+    QTimer::singleShot(0, w, [w]() { doCenter(w); });
 }
 
-// 仅设置初始居中位置，不 show：避免窗口首次显示前停在屏幕边角，
-// show/切换时仍由 centerAndShow 负责最终居中。
+// 创建阶段仅预估居中（窗口尚未 show，frameGeometry 可能为空，用 sizeHint 兜底）。
+// 真正的精确居中在 centerAndShow 里完成。
 void placeWindowCentered(QWidget* w)
 {
     if (!w) return;
-    if (QScreen* screen = QGuiApplication::primaryScreen()) {
-        const QRect avail = screen->availableGeometry();
-        const QRect frame = w->frameGeometry().isEmpty() ? w->geometry() : w->frameGeometry();
-        w->move(avail.center() - frame.center());
-    }
+    QScreen* screen = QGuiApplication::primaryScreen();
+    if (!screen) return;
+    const QRect avail = screen->availableGeometry();
+    QRect frame = w->frameGeometry();
+    int fw = frame.width(), fh = frame.height();
+    if (fw <= 0) fw = w->sizeHint().width();
+    if (fh <= 0) fh = w->sizeHint().height();
+    w->move(avail.center().x() - fw / 2, avail.center().y() - fh / 2);
 }
 } // namespace
 

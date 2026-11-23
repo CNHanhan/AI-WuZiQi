@@ -209,7 +209,7 @@ void GameWindow::endGame(int winnerColor, const QString &reason, const QString &
     if (winnerColor == AIWZQ::Color::EMPTY) {
         banner = QStringLiteral("🤝 和棋，再来一局！");
     } else if (winnerColor == myColor_) {
-        banner = QStringLiteral("🎉 胜利！恭喜爸爸！");
+        banner = QStringLiteral("🎉 胜利！恭喜您！");
     } else {
         banner = QStringLiteral("💪 别灰心，再来一局！");
     }
