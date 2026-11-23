@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 
 #ifdef __linux__
@@ -16,6 +17,16 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <cerrno>
+#endif
+
+#ifdef _WIN32
+// winsock2.h 必须先于 windows.h；TcpServer.h 已经通过 TcpConnection.h 先行引入，
+// 这里再显式包含一次保证自洽（重复包含有 include guard 保护）。
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #endif
 
 #include <openssl/ssl.h>
@@ -85,6 +96,43 @@ int TcpServer::createAndListen(int port) {
         return -1;
     }
     return fd;
+#elif defined(_WIN32)
+    WSADATA wsaData;
+    int wsaRet = ::WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (wsaRet != 0) {
+        SPDLOG_ERROR("WSAStartup failed, ret={}", wsaRet);
+        return -1;
+    }
+    SOCKET sock = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == INVALID_SOCKET) {
+        SPDLOG_ERROR("socket failed, err={}", ::WSAGetLastError());
+        return -1;
+    }
+    int one = 1;
+    ::setsockopt(sock, SOL_SOCKET, SO_REUSEADDR,
+                 reinterpret_cast<const char*>(&one), sizeof(one));
+    struct sockaddr_in addr;
+    std::memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(static_cast<uint16_t>(port));
+    if (::bind(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+        SPDLOG_ERROR("bind port={} failed, err={}", port, ::WSAGetLastError());
+        ::closesocket(sock);
+        return -1;
+    }
+    if (::listen(sock, SOMAXCONN) == SOCKET_ERROR) {
+        SPDLOG_ERROR("listen failed, err={}", ::WSAGetLastError());
+        ::closesocket(sock);
+        return -1;
+    }
+    u_long nonBlocking = 1;   // FIONBIO：非阻塞监听，acceptLoop 轮询
+    if (::ioctlsocket(sock, FIONBIO, &nonBlocking) == SOCKET_ERROR) {
+        SPDLOG_ERROR("ioctlsocket FIONBIO failed, err={}", ::WSAGetLastError());
+        ::closesocket(sock);
+        return -1;
+    }
+    return static_cast<int>(sock);
 #else
     (void)port;
     return -1;
@@ -94,6 +142,12 @@ int TcpServer::createAndListen(int port) {
 void TcpServer::closeListen() {
 #ifdef __linux__
     if (listenFd_ >= 0) { ::close(listenFd_); listenFd_ = -1; }
+#elif defined(_WIN32)
+    if (listenFd_ >= 0) {
+        ::closesocket(static_cast<SOCKET>(listenFd_));
+        listenFd_ = -1;
+    }
+    ::WSACleanup();
 #endif
 }
 
@@ -155,6 +209,51 @@ void TcpServer::acceptLoop() {
         IMessageHandler* h = handler_;
 
         // 注册 epoll 与 onConnected 都在 loop 线程内完成，保证事件顺序与线程归属一致
+        loop->runInLoop([loop, fd, conn, h]() {
+            loop->addConnection(fd, conn);
+            if (h) h->onConnected(conn.get());
+        });
+
+        SPDLOG_DEBUG("accepted fd={} ip={} -> loop {} id={}", fd, ip, idx, cid);
+    }
+#elif defined(_WIN32)
+    while (running_.load()) {
+        struct sockaddr_in peer;
+        int len = static_cast<int>(sizeof(peer));
+        SOCKET client = ::accept(static_cast<SOCKET>(listenFd_),
+                                 reinterpret_cast<struct sockaddr*>(&peer), &len);
+        if (client == INVALID_SOCKET) {
+            int e = ::WSAGetLastError();
+            if (e == WSAEINTR) continue;
+            if (e == WSAEWOULDBLOCK) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));   // 非阻塞 accept：1ms 退避
+                continue;
+            }
+            SPDLOG_WARN("accept failed, err={}", e);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
+        }
+        u_long nonBlocking = 1;
+        if (::ioctlsocket(client, FIONBIO, &nonBlocking) == SOCKET_ERROR) {
+            SPDLOG_WARN("ioctlsocket(client) failed, err={}", ::WSAGetLastError());
+            ::closesocket(client);
+            continue;
+        }
+        char ip[INET_ADDRSTRLEN] = "0.0.0.0";
+        unsigned long peerAddr = peer.sin_addr.S_un.S_addr;
+        const char* inet = ::inet_ntoa(peer.sin_addr);
+        if (inet) std::snprintf(ip, sizeof(ip), "%s", inet);
+        (void)peerAddr;
+        int fd = static_cast<int>(client);
+        int64_t cid = nextConnId_.fetch_add(1);
+        size_t idx = static_cast<size_t>(cid) % loops_.size();
+        EventLoop* loop = loops_[idx].get();
+
+        auto conn = std::make_shared<TcpConnection>(
+            fd, std::string(ip), cid, loop, handler_, tlsEnabled_ ? sslCtx_ : nullptr);
+        IMessageHandler* h = handler_;
+
+        // 注册连接与 onConnected 都在 loop 线程内完成，保证事件顺序与线程归属一致
         loop->runInLoop([loop, fd, conn, h]() {
             loop->addConnection(fd, conn);
             if (h) h->onConnected(conn.get());

@@ -183,21 +183,35 @@ void TcpClient::onSocketError(QAbstractSocket::SocketError err)
 
 void TcpClient::onSslErrors(const QList<QSslError>& errors)
 {
-    // 证书固定：如果 peer 证书指纹命中白名单，则忽略自签/不可信/主机名等错误
-    if (certPinner_ && certPinner_->shouldIgnoreSslErrors(errors, socket_)) {
-        socket_->ignoreSslErrors(errors);
-        return;
-    }
-    // 否则严格校验 peer 证书指纹；不匹配则中断
-    if (certPinner_ && !certPinner_->pins().isEmpty()
-        && !certPinner_->verifyCertificate(socket_)) {
+    for (const QSslError& e : errors)
+        qWarning() << "[TcpClient] ssl error:" << int(e.error()) << e.errorString();
+
+    // 证书固定：用 sslErrors 自带的证书校验指纹（sslErrors 阶段 peerCertificate()
+    // 在部分 Qt 版本可能为空，而 e.certificate() 始终可用）。
+    if (certPinner_ && !certPinner_->pins().isEmpty()) {
+        bool pinned = false;
+        for (const QSslError& e : errors) {
+            if (certPinner_->isPinned(e.certificate())) { pinned = true; break; }
+        }
+        if (!pinned) pinned = certPinner_->isPinned(socket_->peerCertificate());
+
+        if (pinned) {
+            // 指纹命中白名单：自签/不可信/主机名错误全部可忽略，握手继续
+            qInfo() << "[TcpClient] certificate pin matched, ignoring SSL errors";
+            socket_->ignoreSslErrors(errors);
+            return;
+        }
+        // 指纹不匹配：立即中断，防止中间人
         lastError_ = QStringLiteral("certificate pin mismatch");
         emit sslPinFailed(CertificatePinner::fingerprintOf(socket_->peerCertificate()));
         socket_->abort();
         return;
     }
-    for (const QSslError& e : errors)
-        qWarning() << "[TcpClient] ssl error:" << int(e.error()) << e.errorString();
+
+    // 未配置 pin：退回 shouldIgnoreSslErrors 的默认逻辑
+    if (certPinner_ && certPinner_->shouldIgnoreSslErrors(errors, socket_)) {
+        socket_->ignoreSslErrors(errors);
+    }
 }
 
 void TcpClient::onPeerVerifyError(const QSslError& error)

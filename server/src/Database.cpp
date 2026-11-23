@@ -12,6 +12,12 @@
 #include <cstring>
 #include <ctime>
 #include <mutex>
+#include <type_traits>
+
+// AIWZQ_PORT: 跨平台适配 MYSQL_BIND::is_null 的元素类型。
+// Oracle MySQL 8 是 bool*，MariaDB/MySQL 5.x 是 my_bool*(char*)。
+// 直接由成员声明反推，不依赖版本宏，两端编译期自动匹配。
+using AIWZQ_IsNull = std::remove_pointer_t<decltype(MYSQL_BIND::is_null)>;
 
 #define DB_LOCK std::lock_guard<std::mutex> _dbLock(mtx_);
 
@@ -95,9 +101,12 @@ bool Database::connect() {
     mysql_options(conn_, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
     mysql_options(conn_, MYSQL_SET_CHARSET_NAME, "utf8mb4");
 
+    // CLIENT_FOUND_ROWS：让 affected_rows 返回"匹配行数"而非"值变化行数"。
+    // 否则 UPDATE coins=coins-0 WHERE ...（免费商品 price=0）会返回 0，
+    // buyItem 的条件扣款校验 affected_rows==1 永远失败。
     if (!mysql_real_connect(conn_, cfg.host.c_str(), cfg.user.c_str(),
                             cfg.password.c_str(), cfg.dbname.c_str(), cfg.port,
-                            nullptr, 0)) {
+                            nullptr, CLIENT_FOUND_ROWS)) {
         mysql_close(conn_);
         conn_ = nullptr;
         return false;
@@ -118,9 +127,12 @@ bool Database::ensureConnected() {
     unsigned int timeout = 5;
     mysql_options(conn_, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
     mysql_options(conn_, MYSQL_SET_CHARSET_NAME, "utf8mb4");
+    // CLIENT_FOUND_ROWS：让 affected_rows 返回"匹配行数"而非"值变化行数"。
+    // 否则 UPDATE coins=coins-0 WHERE ...（免费商品 price=0）会返回 0，
+    // buyItem 的条件扣款校验 affected_rows==1 永远失败。
     if (!mysql_real_connect(conn_, cfg.host.c_str(), cfg.user.c_str(),
                             cfg.password.c_str(), cfg.dbname.c_str(), cfg.port,
-                            nullptr, 0)) {
+                            nullptr, CLIENT_FOUND_ROWS)) {
         mysql_close(conn_); conn_ = nullptr; return false;
     }
     return true;
@@ -190,7 +202,7 @@ bool fetchUserBy(MYSQL* conn, const char* sql, const std::string& key, bool byUi
         int32_t elo = 0, wins = 0, losses = 0, draws = 0, total = 0, status = 0;
         int32_t attempts = 0;
         unsigned long len_uname=0,len_hash=0,len_salt=0,len_email=0,len_avatar=0,len_reg=0,len_last=0,len_lock=0;
-        bool n_last=true, n_lock=true;
+        AIWZQ_IsNull n_last=true, n_lock=true;
 
         MYSQL_BIND rb[16];
         std::memset(rb, 0, sizeof(rb));
@@ -392,7 +404,7 @@ bool Database::queryShopItems(std::vector<ShopItem>& items) {
         if(mysql_stmt_execute(stmt)) break;
         char name[96],desc[320],type[24],path[160];
         unsigned long lname=0,ldesc=0,ltype=0,lpath=0;
-        int64_t id=0; uint32_t price=0; bool hot=false;
+        int64_t id=0; uint32_t price=0; AIWZQ_IsNull hot=false;
         MYSQL_BIND b[7]; std::memset(b,0,sizeof(b));
         b[0].buffer_type=MYSQL_TYPE_LONGLONG; b[0].buffer=&id;    b[0].buffer_length=sizeof(id); b[0].is_unsigned=1;
         b[1].buffer_type=MYSQL_TYPE_STRING;   b[1].buffer=name;   b[1].buffer_length=sizeof(name);   b[1].length=&lname;

@@ -1,6 +1,6 @@
 # AI-WuZiQi 服务端证书 SHA-256 指纹（DER 的 SHA-256，64 位十六进制）
-# 静态证书指纹在这里填写，每行一个；允许 # 注释与空行。
-# 生成方式（部署时替换占位值）：
-#   openssl x509 -in server.crt -outform DER | openssl dgst -sha256
-# 下面为占位示例（请替换为真实服务端证书指纹，否则握手会因 pin 不匹配而中断）：
-# 3f9a1c7b2d4e8f6a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3
+# 静态证书指纹写在这里，每行一个；允许 # 注释与空行。
+# 生成方式（注意 Windows PowerShell 管道会破坏 DER 二进制，务必用 -fingerprint）：
+#   openssl x509 -in server.crt -noout -fingerprint -sha256
+# 本地自签证书（CN=localhost, ECDSA P-256, 有效期 2026-2036）
+5a0c5b93f2d377ddb8672b579454dd3cea4d6aa2b5d628552580b62c29301867

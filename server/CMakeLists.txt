@@ -97,4 +97,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_options(AIWZQ_Server PRIVATE -Wall -Wextra)
 endif()
 
+if(WIN32)
+    # Winsock2：select/recv/send/closesocket/WSAStartup 全部来自 ws2_32。
+    target_link_libraries(AIWZQ_Server PRIVATE ws2_32)
+endif()
+
 message(STATUS "AIWZQ_Server configured: ${CMAKE_CXX_STANDARD}, openssl=${OPENSSL_VERSION}")

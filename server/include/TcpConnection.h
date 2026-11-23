@@ -4,6 +4,15 @@
 // 实现 IConnection 契约，负责帧解码（popFrame）、非阻塞发送、可选 TLS。
 // 生命周期由所属 EventLoop 以 shared_ptr 持有；所有 IO 回调都在 loop 线程执行。
 
+// Windows 下 winsock2.h 必须先于 windows.h 被包含（spdlog/openssl 可能间接引入 windows.h）
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#endif
+
 #include "IMessageHandler.h"
 #include "Protocol.h"
 #include "EventLoop.h"
@@ -27,14 +36,32 @@
 #define AIWZQ_RECV(fd, buf, len)   ::recv((fd), (buf), (len), 0)
 #define AIWZQ_SEND(fd, buf, len)   ::send((fd), (buf), (len), MSG_NOSIGNAL)
 #define AIWZQ_ERRNO                errno
+#elif defined(_WIN32)
+// Windows：Winsock2 + select。recv/send 返回 SOCKET_ERROR(-1)，错误码走 WSAGetLastError()。
+// Windows 无 MSG_NOSIGNAL，send 第 4 参固定为 0。
+#define AIWZQ_CLOSE(fd)            ::closesocket(static_cast<SOCKET>(fd))
+#define AIWZQ_RECV(fd, buf, len)   ::recv(static_cast<SOCKET>(fd), (buf), static_cast<int>(len), 0)
+#define AIWZQ_SEND(fd, buf, len)   ::send(static_cast<SOCKET>(fd), (buf), static_cast<int>(len), 0)
+#define AIWZQ_ERRNO                WSAGetLastError()
 #else
-// 非 Linux 平台编译期占位：网络层目标平台为 Linux(epoll)，此处仅提供可解析占位。
-#pragma message("AI-WuZiQi server network layer targets Linux (epoll); non-Linux build uses stubs.")
+// 其他非 Linux 平台编译期占位：仅提供可解析占位。
 #include <cerrno>
 #define AIWZQ_CLOSE(fd)            (0)
 #define AIWZQ_RECV(fd, buf, len)   (-1)
 #define AIWZQ_SEND(fd, buf, len)   (-1)
 #define AIWZQ_ERRNO                EIO
+#endif
+
+// 统一的可重试错误码判断：Linux 走 errno，Windows 走 WSA 错误码。
+// 主体读写逻辑据此判断，避免在各平台分支里散落条件编译。
+#ifdef _WIN32
+#define AIWZQ_EINTR                WSAEINTR
+#define AIWZQ_EAGAIN               WSAEWOULDBLOCK
+#define AIWZQ_EWOULDBLOCK          WSAEWOULDBLOCK
+#else
+#define AIWZQ_EINTR                EINTR
+#define AIWZQ_EAGAIN               EAGAIN
+#define AIWZQ_EWOULDBLOCK          EWOULDBLOCK
 #endif
 
 #ifndef MSG_NOSIGNAL
@@ -112,6 +139,8 @@ public:
     int fd() const { return sockFd_; }
     bool connected() const { return connected_.load(); }
     bool initialWantWrite() const { return ssl_ != nullptr && !handshaked_; }
+    // select 写集判定：正在写（含 TLS 握手期望写）或初始期望写时都需要监听可写。
+    bool wantWrite() const { return writing_ || initialWantWrite(); }
 
     void handleRead() {
         if (!connected_.load()) return;
@@ -140,12 +169,12 @@ public:
             }
             if (n == 0) { handleClose(); return; }            // 对端关闭
             int e = AIWZQ_ERRNO;
-            if (e == EINTR) continue;
+            if (e == AIWZQ_EINTR) continue;
             if (ssl_) {
                 int se = SSL_get_error(ssl_, static_cast<int>(n));
                 if (se == SSL_ERROR_WANT_READ || se == SSL_ERROR_WANT_WRITE) return;
                 if (se == SSL_ERROR_ZERO_RETURN) { handleClose(); return; }
-            } else if (e == EAGAIN || e == EWOULDBLOCK) {
+            } else if (e == AIWZQ_EAGAIN || e == AIWZQ_EWOULDBLOCK) {
                 return;                                        // ET：读空
             }
             handleClose();
@@ -224,11 +253,11 @@ private:
             ssize_t n = doWrite(chunk.data() + sent, chunk.size() - sent);
             if (n > 0) { sent += static_cast<size_t>(n); continue; }
             int e = AIWZQ_ERRNO;
-            if (n < 0 && e == EINTR) continue;
+            if (n < 0 && e == AIWZQ_EINTR) continue;
             if (n < 0 && ssl_) {
                 int se = SSL_get_error(ssl_, static_cast<int>(n));
                 if (se == SSL_ERROR_WANT_READ || se == SSL_ERROR_WANT_WRITE) break;
-            } else if (n < 0 && (e == EAGAIN || e == EWOULDBLOCK)) {
+            } else if (n < 0 && (e == AIWZQ_EAGAIN || e == AIWZQ_EWOULDBLOCK)) {
                 break;
             } else if (n == 0) {
                 break;
