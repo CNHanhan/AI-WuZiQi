@@ -51,6 +51,14 @@ config.local.*
 secrets/
 server_cert.fingerprint.local
 
+# ============ Python ============
+__pycache__/
+*.pyc
+
+# ============ 第三方工具二进制包（按需自行下载） ============
+tools/redis/*.zip
+tools/redis/*.exe
+
 # ============ 日志 / 临时 ============
 *.log
 logs/
