@@ -3,6 +3,7 @@
 #include <QLineEdit>
 #include <QDebug>
 #include <QKeyEvent>
+#include <QTest>
 #include "LoginWindow.h"
 
 static bool testField(QWidget* w, const char* fieldName, const QString& label) {
@@ -24,9 +25,18 @@ static bool testField(QWidget* w, const char* fieldName, const QString& label) {
             << "visible=" << target->isVisible()
             << "maxLen=" << target->maxLength();
 
-    // 用 sendEvent 逐字符发送 ASCII（绕过 QTest 平台插件兼容问题）
+    // 关键：测试【鼠标点击】能否把焦点给输入框（复现爸爸"点了没光标"的问题）
     target->clear();
-    target->setFocus();
+    QTest::mouseClick(target, Qt::LeftButton);
+    QWidget* focused = QApplication::focusWidget();
+    bool clickFocused = (focused == target);
+    qInfo() << fieldName << "mouseClick -> focusWidget="
+            << (focused ? focused->metaObject()->className() : "null")
+            << "clickFocused=" << clickFocused;
+
+    // 再用 sendEvent 逐字符发送 ASCII 验证可输入
+    target->clear();
+    if (!clickFocused) target->setFocus();
     QString typed = "abc123";
     for (int i = 0; i < typed.size(); ++i) {
         QString ch(typed[i]);
@@ -35,14 +45,18 @@ static bool testField(QWidget* w, const char* fieldName, const QString& label) {
     }
     bool ok = (target->text() == typed);
     qInfo() << (ok ? "[PASS]" : "[FAIL]") << fieldName << "text=" << target->text();
-    return ok;
+    return ok && clickFocused;
 }
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     LoginWindow w;
     w.show();
-    qInfo() << "window size=" << w.width() << "x" << w.height();
+    // 不手动 activate，验证 LoginWindow::showEvent 自身的焦点修复是否生效
+    QCoreApplication::processEvents();
+    qInfo() << "window size=" << w.width() << "x" << w.height()
+            << "activeWindow=" << (QApplication::activeWindow() ? "yes" : "no")
+            << "focusWidget=" << (QApplication::focusWidget() ? QApplication::focusWidget()->metaObject()->className() : "null");
 
     bool all = true;
     all &= testField(&w, "usernameEdit_", QStringLiteral("用户名"));

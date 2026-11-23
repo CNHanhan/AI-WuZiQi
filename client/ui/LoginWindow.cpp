@@ -1,6 +1,7 @@
 #include "LoginWindow.h"
 
 #include <QApplication>
+#include <QShowEvent>
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -84,6 +85,19 @@ void LoginWindow::setupUi()
 
     // 回车登录
     connect(passwordEdit_, &QLineEdit::returnPressed, this, &LoginWindow::onLoginClicked);
+}
+
+void LoginWindow::showEvent(QShowEvent* event)
+{
+    QMainWindow::showEvent(event);
+    // 窗口首次显示时确保被激活，并把焦点落到用户名输入框。
+    // Windows 下若窗口未激活，首次点击只激活窗口而不聚焦 QLineEdit，
+    // 表现为"点输入框没光标/无法输入"——这里主动激活+设焦点规避。
+    activateWindow();
+    raise();
+    if (usernameEdit_) {
+        usernameEdit_->setFocus(Qt::ActiveWindowFocusReason);
+    }
 }
 
 bool LoginWindow::validateInput()

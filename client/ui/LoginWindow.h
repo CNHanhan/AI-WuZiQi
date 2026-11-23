@@ -46,6 +46,7 @@ private slots:
 private:
     bool validateInput();
     void setupUi();
+    void showEvent(QShowEvent* event) override;   // 窗口显示时让用户名框获得焦点
 
     QLineEdit *usernameEdit_;
     QLineEdit *passwordEdit_;
