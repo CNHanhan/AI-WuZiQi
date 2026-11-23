@@ -3,6 +3,10 @@
 #include <QApplication>
 #include <QShowEvent>
 #include <QWidget>
+#ifdef _WIN32
+#include <windows.h>
+#include <imm.h>
+#endif
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -36,6 +40,13 @@ void LoginWindow::setupUi()
     passwordEdit_->setEchoMode(QLineEdit::Password);
     emailEdit_ = new QLineEdit(central);
     emailEdit_->setPlaceholderText(QStringLiteral("邮箱（注册用）"));
+
+    // 关闭输入法(IME)：用户名/邮箱是 ASCII，密码也只需英数。
+    // 中文输入法处于中文态时会吞掉键盘消息（光标闪但打不进字），
+    // 禁用 WA_InputMethodEnabled 让这些框直接收键盘字符，不经过输入法。
+    usernameEdit_->setAttribute(Qt::WA_InputMethodEnabled, false);
+    passwordEdit_->setAttribute(Qt::WA_InputMethodEnabled, false);
+    emailEdit_->setAttribute(Qt::WA_InputMethodEnabled, false);
 
     loginBtn_     = new QPushButton(QStringLiteral("登录"), central);
     registerBtn_  = new QPushButton(QStringLiteral("注册"), central);
@@ -95,6 +106,15 @@ void LoginWindow::showEvent(QShowEvent* event)
     // 表现为"点输入框没光标/无法输入"——这里主动激活+设焦点规避。
     activateWindow();
     raise();
+#ifdef _WIN32
+    // 强制关闭当前窗口的中文输入法(IME)，切到英文输入状态。
+    // 中文输入法开启且候选框未正常弹出时，会吞掉所有键盘消息，
+    // 表现为"光标在闪但数字/字母都打不进去"。
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    if (hwnd) {
+        ImmAssociateContext(hwnd, nullptr);   // 解除 IME 关联 → 英文输入
+    }
+#endif
     if (usernameEdit_) {
         usernameEdit_->setFocus(Qt::ActiveWindowFocusReason);
     }

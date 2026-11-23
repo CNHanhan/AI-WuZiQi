@@ -95,8 +95,9 @@ target_link_libraries(AI-WuZiQi_Client PRIVATE
 )
 
 # Windows 下 SecureStorage 需要 Advapi32（CredWrite/CredRead/CredDelete）
+# imm32 用于关闭输入框的中文输入法(IME)，避免中文输入状态吞掉键盘消息
 if(WIN32)
-    target_link_libraries(AI-WuZiQi_Client PRIVATE Advapi32)
+    target_link_libraries(AI-WuZiQi_Client PRIVATE Advapi32 imm32)
 endif()
 
 # 输出名统一为 AI-WuZiQi

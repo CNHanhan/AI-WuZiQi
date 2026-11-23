@@ -10,3 +10,6 @@ add_executable(ui_login_test
     ${CMAKE_SOURCE_DIR}/../client/ui/LoginWindow.h
 )
 target_link_libraries(ui_login_test PRIVATE Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Test)
+if(WIN32)
+    target_link_libraries(ui_login_test PRIVATE imm32)
+endif()
