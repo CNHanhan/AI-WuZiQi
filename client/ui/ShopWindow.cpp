@@ -112,6 +112,10 @@ void ShopWindow::setCoins(qint64 coins)
 
 void ShopWindow::refreshList()
 {
+    // 刷新前先记下当前选中商品 id：itemList_->clear() 会触发 currentItemChanged(nullptr)，
+    // 把成员 currentId_ 清零。不先保存下来，刷新后就无法恢复原来的选中项。
+    const qint64 savedId = currentId_;
+
     itemList_->clear();
     QString filter = filterCombo_->currentData().toString();
     for (const ShopItemInfo &it : items_) {
@@ -123,8 +127,23 @@ void ShopWindow::refreshList()
         row->setData(Qt::UserRole, it.id);
         itemList_->addItem(row);
     }
-    if (itemList_->count() > 0)
-        itemList_->setCurrentRow(0);
+
+    // 优先恢复刷新前的选中项（购买/装备后服务端会回 SHOP_LIST_REQ 刷新，
+    // 若这里无条件选第 0 行，选中项会跳回第一个商品，经典棋盘通常已拥有、购买按钮禁用，
+    // 爸爸就会觉得"点击购买跳到第一个、无法购买"）。
+    int restoreRow = -1;
+    if (savedId > 0) {
+        for (int i = 0; i < itemList_->count(); ++i) {
+            if (itemList_->item(i)->data(Qt::UserRole).toLongLong() == savedId) {
+                restoreRow = i;
+                break;
+            }
+        }
+    }
+    if (restoreRow >= 0)
+        itemList_->setCurrentRow(restoreRow);   // 触发 onCurrentItemChanged，按新 owned/equipped 状态刷新按钮
+    else if (itemList_->count() > 0)
+        itemList_->setCurrentRow(0);            // 原选中项被过滤/下架才退回第一行
 }
 
 ShopItemInfo ShopWindow::currentItem() const
@@ -176,6 +195,12 @@ void ShopWindow::onBuyClicked()
     if (currentId_ <= 0)
         return;
     ShopItemInfo it = currentItem();
+    // 已拥有的商品其购买按钮在 onCurrentItemChanged 里已被禁用（正常情况下点不到这里），
+    // 这里再兜底提示一次，避免任何绕过禁用态时把"无法购买"误认为故障。
+    if (it.owned) {
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("该商品已拥有，无需重复购买"));
+        return;
+    }
     if (it.price > coins_) {
         QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("金币不足"));
         return;

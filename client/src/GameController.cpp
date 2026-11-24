@@ -87,6 +87,10 @@ GameController::GameController(QObject* parent)
     matchPollTimer_ = new QTimer(this);
     matchPollTimer_->setInterval(2 * 1000);
     connect(matchPollTimer_, &QTimer::timeout, this, &GameController::onMatchPollTick);
+    // 匹配对话框每秒倒计时：驱动进度条与"剩余 N 秒"文本（非 singleShot，周期触发）
+    matchTickTimer_ = new QTimer(this);
+    matchTickTimer_->setInterval(1000);
+    connect(matchTickTimer_, &QTimer::timeout, this, &GameController::onMatchTick);
 
     connect(tcp_, &TcpClient::messageReceived, this, &GameController::onMessageReceived);
     connect(tcp_, &TcpClient::connected,       this, &GameController::onConnected);
@@ -356,28 +360,49 @@ void GameController::showMatchDialog()
     if (!mainWindow_) return;
     if (!matchDialog_) {
         // 以 MainWindow 为父，非模态显示：不阻塞主线程，网络回调仍能推进匹配。
-        // 用 indeterminate 进度条表达"等待中"，并带一个可点的"取消"按钮。
+        // 用 0..30 的确定进度条表达 30 秒倒计时，并带一个可点的"取消"按钮。
         matchDialog_ = new QProgressDialog(mainWindow_);
         matchDialog_->setWindowTitle(QStringLiteral("随机匹配"));
-        matchDialog_->setLabelText(
-            QStringLiteral("正在匹配对手，最多等待 30 秒，请稍候..."));
-        matchDialog_->setRange(0, 0);            // 0..0 = 忙碌/不确定进度
         matchDialog_->setCancelButtonText(QStringLiteral("取消"));
         matchDialog_->setMinimumDuration(0);     // 立即显示，不延迟
         matchDialog_->setWindowModality(Qt::WindowModal); // 仅阻塞大厅窗口，不卡事件循环
         connect(matchDialog_, &QProgressDialog::canceled,
                 this, &GameController::onMatchCancelled);
     }
-    // range(0,0) 是不确定进度（转圈），无需 setValue；hide() 也不会触发 canceled，
-    // 只有用户点"取消"按钮才发 canceled -> onMatchCancelled。
+    // 复用对话框时重置计数：range 固定 0..30，起始 0 秒已过、剩余 30 秒。
+    matchDialog_->setRange(0, 30);
+    matchRemainSec_ = 30;
+    matchDialog_->setValue(0);
+    matchDialog_->setLabelText(
+        QStringLiteral("正在匹配对手，剩余 %1 秒...").arg(matchRemainSec_));
+    // 每秒刷新进度条与文本；30 秒总超时仍由 matchWaitTimer_ 负责。
+    if (matchTickTimer_) matchTickTimer_->start();
+    // hide() 也不会触发 canceled，只有用户点"取消"按钮才发 canceled -> onMatchCancelled。
     matchDialog_->show();
     matchDialog_->raise();
     matchDialog_->activateWindow();
 }
 
+void GameController::onMatchTick()
+{
+    // 每秒递减剩余秒数并同步进度条：setValue(已过秒数) = 30 - 剩余。
+    if (matchRemainSec_ > 0)
+        --matchRemainSec_;
+    if (matchDialog_) {
+        matchDialog_->setValue(30 - matchRemainSec_);
+        matchDialog_->setLabelText(
+            QStringLiteral("正在匹配对手，剩余 %1 秒...").arg(matchRemainSec_));
+    }
+    // 归零后停掉 tick；真正的超时收口（关框+提示+回大厅）由 onMatchWaitTimedOut 处理。
+    if (matchRemainSec_ <= 0 && matchTickTimer_)
+        matchTickTimer_->stop();
+}
+
 void GameController::hideMatchDialog()
 {
     if (!matchDialog_) return;
+    // 隐藏时一并停掉倒计时定时器，避免对话框不可见时仍在空转。
+    if (matchTickTimer_) matchTickTimer_->stop();
     // hide() 不触发 canceled 信号，安全；对话框复用，仅隐藏不销毁。
     matchDialog_->hide();
 }

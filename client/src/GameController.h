@@ -81,6 +81,7 @@ public slots:
     void onRoomWaitTimedOut();     // RoomWindow 等待对手 150 秒超时
     void onMatchWaitTimedOut();    // 随机匹配 30 秒超时
     void onMatchPollTick();        // 随机匹配等待期间每 2 秒重发一次检查配对结果
+    void onMatchTick();            // 匹配对话框每秒倒计时刷新
     void onMatchCancelled();       // 用户点匹配对话框"取消"：退出匹配池
 
     // 对局
@@ -169,6 +170,8 @@ private:
 
     QTimer* matchWaitTimer_ = nullptr;   // 随机匹配 30 秒总超时
     QTimer* matchPollTimer_ = nullptr;   // 随机匹配等待期间的 2 秒轮询定时器
+    QTimer* matchTickTimer_ = nullptr;   // 匹配对话框 1 秒周期倒计时定时器
+    int matchRemainSec_ = 30;            // 匹配倒计时剩余秒数
     QProgressDialog* matchDialog_ = nullptr; // 随机匹配等待对话框（可见反馈 + 取消）
 
     TcpClient*     tcp_    = nullptr;
