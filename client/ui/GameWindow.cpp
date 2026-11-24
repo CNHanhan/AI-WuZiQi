@@ -117,13 +117,16 @@ void GameWindow::startGame(int myColor,
     whiteTimeBar_->setValue(totalMax_);
 
     clearBoard();
-    refreshInfoLabels();
     // 黑先手：若我是黑方则我先落子
     setTurn(myColor_ == AIWZQ::Color::BLACK);
     statusLabel_->setText(QStringLiteral("对局开始"));
 
     if (!gameTimer_->isActive())
         gameTimer_->start();
+
+    // 对局信息（黑方/白方是谁）在一切初始化完成后刷新，
+    // 确保 label 不再停留在构造时的"黑方：--"/"白方：--"。
+    refreshInfoLabels();
 }
 
 // ---------- 外部数据回填 ----------
@@ -275,8 +278,13 @@ void GameWindow::onSurrender()
 // ---------- 辅助 ----------
 void GameWindow::refreshInfoLabels()
 {
-    QString blackName = (myColor_ == AIWZQ::Color::BLACK) ? myName_ : opponentName_;
-    QString whiteName = (myColor_ == AIWZQ::Color::WHITE) ? myName_ : opponentName_;
+    // 自己名字有兜底"玩家"；对手名字若服务端未下发/为空，回退显示"对手"，
+    // 保证对局过程中黑白双方信息永远可见，不会出现"黑方："后空白。
+    QString selfName = myName_.isEmpty() ? QStringLiteral("玩家") : myName_;
+    QString oppName  = opponentName_.isEmpty() ? QStringLiteral("对手") : opponentName_;
+
+    QString blackName = (myColor_ == AIWZQ::Color::BLACK) ? selfName : oppName;
+    QString whiteName = (myColor_ == AIWZQ::Color::WHITE) ? selfName : oppName;
     blackInfoLabel_->setText(QStringLiteral("黑方：%1").arg(blackName));
     whiteInfoLabel_->setText(QStringLiteral("白方：%1").arg(whiteName));
 }

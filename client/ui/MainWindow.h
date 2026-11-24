@@ -17,6 +17,7 @@ class QPushButton;
 class QLabel;
 class QSpinBox;
 class QShowEvent;
+class QEvent;
 
 // 房间条目（净化的值对象，不依赖任何 protocol/网络类型）
 struct RoomEntry {
@@ -78,6 +79,8 @@ private:
     void setupUi();
     void updatePageLabel();
     void showEvent(QShowEvent* event) override;   // 窗口显示时激活并把焦点交给聊天输入框
+    bool eventFilter(QObject* obj, QEvent* event) override; // 聊天框点击/窗口激活时补焦点（保留中文输入法）
+    void focusChatInput();                        // 激活窗口并把焦点交给聊天输入框
 
     QTableWidget *roomTable_;
     QListWidget  *playerList_;

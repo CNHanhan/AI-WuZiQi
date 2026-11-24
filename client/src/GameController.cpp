@@ -22,8 +22,8 @@
 #include <QApplication>
 #include <QScreen>
 #include <QTimer>
-#include <QTimer>
 #include <QMessageBox>
+#include <QProgressDialog>
 
 namespace {
 // 把窗口移动到屏幕正中央。
@@ -301,6 +301,17 @@ void GameController::requestRoomList(int page, int pageSize)
     d.insert(QStringLiteral("page"), page);
     d.insert(QStringLiteral("page_size"), pageSize);
     send(AIWZQ::MsgType::ROOM_LIST_REQ, d);
+    // 进入/刷新大厅时同步拉取在线玩家列表。
+    // 之前客户端从未发出 player_list_req，服务端虽有 handlePlayerList，
+    // 但没有请求就没有 player_list_resp，大厅在线玩家列表永远为空。
+    // 房间列表和玩家列表一并刷新，登录/重连/返回大厅/点刷新按钮均覆盖到。
+    requestPlayerList();
+}
+
+void GameController::requestPlayerList()
+{
+    // 服务端 handlePlayerList 忽略请求体，直接回 players 数组，故空对象即可
+    send(AIWZQ::MsgType::PLAYER_LIST_REQ, QJsonObject());
 }
 
 void GameController::onCreateRoomRequested(int totalTime, int stepTime, const QString& password)
@@ -327,6 +338,9 @@ void GameController::onRandomMatchRequested()
     if (matchWaitTimer_) matchWaitTimer_->start();   // 30 秒总超时
     if (matchPollTimer_) matchPollTimer_->start();   // 每 2 秒轮询配对结果
     emit statusMessage(QStringLiteral("正在匹配对手，最多等待 30 秒..."));
+    // 关键可见反馈：之前只 emit statusMessage，而 statusMessage 仅连到日志，
+    // 爸爸点完看不到任何反应。这里弹出明确的"正在匹配"对话框。
+    showMatchDialog();
 }
 
 void GameController::onMatchPollTick()
@@ -334,6 +348,52 @@ void GameController::onMatchPollTick()
     // 每 2 秒重发一次 random_join_req：服务端匹配池会把等待者配对，
     // 配对成功后该请求返回 room_id>0；仍在等待返回 0。
     send(AIWZQ::MsgType::RANDOM_JOIN_REQ, QJsonObject());
+}
+
+// =============== 随机匹配对话框 ===============
+void GameController::showMatchDialog()
+{
+    if (!mainWindow_) return;
+    if (!matchDialog_) {
+        // 以 MainWindow 为父，非模态显示：不阻塞主线程，网络回调仍能推进匹配。
+        // 用 indeterminate 进度条表达"等待中"，并带一个可点的"取消"按钮。
+        matchDialog_ = new QProgressDialog(mainWindow_);
+        matchDialog_->setWindowTitle(QStringLiteral("随机匹配"));
+        matchDialog_->setLabelText(
+            QStringLiteral("正在匹配对手，最多等待 30 秒，请稍候..."));
+        matchDialog_->setRange(0, 0);            // 0..0 = 忙碌/不确定进度
+        matchDialog_->setCancelButtonText(QStringLiteral("取消"));
+        matchDialog_->setMinimumDuration(0);     // 立即显示，不延迟
+        matchDialog_->setWindowModality(Qt::WindowModal); // 仅阻塞大厅窗口，不卡事件循环
+        connect(matchDialog_, &QProgressDialog::canceled,
+                this, &GameController::onMatchCancelled);
+    }
+    // range(0,0) 是不确定进度（转圈），无需 setValue；hide() 也不会触发 canceled，
+    // 只有用户点"取消"按钮才发 canceled -> onMatchCancelled。
+    matchDialog_->show();
+    matchDialog_->raise();
+    matchDialog_->activateWindow();
+}
+
+void GameController::hideMatchDialog()
+{
+    if (!matchDialog_) return;
+    // hide() 不触发 canceled 信号，安全；对话框复用，仅隐藏不销毁。
+    matchDialog_->hide();
+}
+
+void GameController::onMatchCancelled()
+{
+    // 用户主动取消：停掉定时器，关掉对话框，回大厅并刷新列表。
+    // 匹配池条目由服务端 TTL 自动清理。
+    if (matchWaitTimer_) matchWaitTimer_->stop();
+    if (matchPollTimer_) matchPollTimer_->stop();
+    // 协议无专用取消请求：匹配池条目由服务端 40 秒 TTL 自动清理
+    hideMatchDialog();
+    emit statusMessage(QStringLiteral("已取消随机匹配"));
+    if (mainWindow_) mainWindow_->show();
+    setState(InLobby);
+    requestRoomList();
 }
 
 void GameController::onChatRequested(const QString& content)
@@ -416,6 +476,7 @@ void GameController::onMatchWaitTimedOut()
     if (matchWaitTimer_) matchWaitTimer_->stop();
     if (matchPollTimer_) matchPollTimer_->stop();
     // 匹配池条目由服务端 40 秒 TTL 自动清理，无需额外取消协议
+    hideMatchDialog();
     // 随机匹配 30 秒未匹配到对手给出提示（仍处于大厅等待态时）
     if (state_ != InLobby) return;
     emit statusMessage(QStringLiteral("匹配超时，已取消匹配"));
@@ -764,9 +825,20 @@ void GameController::dispatchRoomInfoResp(const QJsonObject& data)
         emit statusMessage(QStringLiteral("仍在等待对手，请稍候..."));
         return;
     }
-    // 匹配成功：停止 30 秒超时与 2 秒轮询
+    // 记录是否正处于随机匹配等待（只有该流程会启动 poll 定时器）。
+    // 服务端在对局/房间状态变化时也会广播 room_info_resp，那些场景不能弹房间窗口盖住对局。
+    const bool wasMatching = matchPollTimer_ && matchPollTimer_->isActive();
+    // 匹配成功：停止 30 秒超时与 2 秒轮询，关闭"正在匹配"对话框
     if (matchWaitTimer_) matchWaitTimer_->stop();
     if (matchPollTimer_) matchPollTimer_->stop();
+    hideMatchDialog();
+    if (wasMatching) {
+        // 随机匹配配对成功：把房间窗口显示出来，否则对话框一关爸爸又是什么都看不到
+        setState(InRoom);
+        if (mainWindow_) mainWindow_->hide();
+        if (roomWindow_) roomWindow_->startWaitingTimeout();
+        centerAndShow(roomWindow_);
+    }
     roomWindow_->setRoomId(roomId);
     const QJsonObject self  = data.value(QStringLiteral("self")).toObject();
     const QJsonObject oppo  = data.value(QStringLiteral("opponent")).toObject();
@@ -797,6 +869,7 @@ void GameController::dispatchGameStartNotify(const QJsonObject& data)
     setState(InGame);
     if (matchWaitTimer_) matchWaitTimer_->stop();
     if (matchPollTimer_) matchPollTimer_->stop();
+    hideMatchDialog();
     if (roomWindow_) { roomWindow_->stopWaitingTimeout(); roomWindow_->hide(); }
     centerAndShow(gameWindow_);
     myColor_   = data.value(QStringLiteral("my_color")).toInt();

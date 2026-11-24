@@ -22,6 +22,7 @@ class AIManager;
 class CryptoManager;
 class SecureStorage;
 class QTimer;
+class QProgressDialog;
 
 class LoginWindow;
 class MainWindow;
@@ -80,6 +81,7 @@ public slots:
     void onRoomWaitTimedOut();     // RoomWindow 等待对手 150 秒超时
     void onMatchWaitTimedOut();    // 随机匹配 30 秒超时
     void onMatchPollTick();        // 随机匹配等待期间每 2 秒重发一次检查配对结果
+    void onMatchCancelled();       // 用户点匹配对话框"取消"：退出匹配池
 
     // 对局
     void onPlaceStoneRequested(int x, int y);
@@ -139,6 +141,9 @@ private:
 
     void parseUserInfo(const QJsonObject& o);
     void requestRoomList(int page = 1, int pageSize = 20);
+    void requestPlayerList();                       // 请求大厅在线玩家列表（登录/刷新会话/刷新房间时一并发出）
+    void showMatchDialog();                         // 显示"正在匹配"进度对话框（带取消按钮）
+    void hideMatchDialog();                         // 关闭匹配对话框（成功/超时/取消统一收口）
     void doReconnect();
     void showLoginAndHideOthers();
 
@@ -164,6 +169,7 @@ private:
 
     QTimer* matchWaitTimer_ = nullptr;   // 随机匹配 30 秒总超时
     QTimer* matchPollTimer_ = nullptr;   // 随机匹配等待期间的 2 秒轮询定时器
+    QProgressDialog* matchDialog_ = nullptr; // 随机匹配等待对话框（可见反馈 + 取消）
 
     TcpClient*     tcp_    = nullptr;
     AIManager*     ai_     = nullptr;

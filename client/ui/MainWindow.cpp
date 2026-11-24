@@ -1,6 +1,9 @@
 #include "MainWindow.h"
 
 #include <QShowEvent>
+#include <QEvent>
+#include <QMouseEvent>
+#include <QTimer>
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -31,13 +34,45 @@ MainWindow::MainWindow(QWidget *parent)
 void MainWindow::showEvent(QShowEvent* event)
 {
     QMainWindow::showEvent(event);
-    // 与 LoginWindow 同样的焦点问题：窗口未激活时首次点击聊天框只激活窗口、
-    // 不聚焦 QLineEdit，中文输入法态下表现为"吞键/打不进字"。
-    // 这里主动激活并把焦点交给聊天输入框；不禁用 IME，保留中文聊天能力。
-    activateWindow();
-    raise();
-    if (chatInput_)
-        chatInput_->setFocus(Qt::ActiveWindowFocusReason);
+    // 原实现只在此处 setFocus 一次。showEvent 仅在窗口由隐藏变可见时触发；
+    // 从别的窗口切回来（activateWindow 不触发 showEvent）焦点就没了，
+    // 且首次 show 时窗口尚未真正激活，setFocus 也会被随后到来的激活事件冲掉。
+    // 改用延迟补焦点，让窗口先完成激活再聚焦，保留中文输入法。
+    focusChatInput();
+}
+
+void MainWindow::focusChatInput()
+{
+    if (!chatInput_) return;
+    // 先激活窗口本身：否则 QLineEdit 即便 setFocus，输入法上下文也没挂到活动窗口，
+    // 表现为"光标在闪但打字没反应"。
+    if (!isActiveWindow()) {
+        activateWindow();
+        raise();
+    }
+    // 延迟到事件循环下一轮，避开 show/激活过程中的焦点重分配。
+    QTimer::singleShot(0, chatInput_, [this]() {
+        if (chatInput_ && isActiveWindow())
+            chatInput_->setFocus(Qt::ActiveWindowFocusReason);
+    });
+}
+
+bool MainWindow::eventFilter(QObject* obj, QEvent* event)
+{
+    // 用户直接点聊天输入框：Qt 默认首次点击可能只激活窗口不落焦点，
+    // 这里在鼠标按下后强制补一次焦点（活动窗口才 setFocus，保留中文输入法态）。
+    if (obj == chatInput_ && event->type() == QEvent::MouseButtonPress) {
+        QTimer::singleShot(0, chatInput_, [this]() {
+            if (chatInput_ && isActiveWindow())
+                chatInput_->setFocus(Qt::ActiveWindowFocusReason);
+        });
+    }
+    // 从房间/对局等窗口切回大厅：窗口激活事件里补焦点。
+    // 不能禁用 WA_InputMethodEnabled（聊天必须支持中文），只在激活时补焦点。
+    if (obj == this && event->type() == QEvent::WindowActivate) {
+        focusChatInput();
+    }
+    return QMainWindow::eventFilter(obj, event);
 }
 
 void MainWindow::setupUi()
@@ -118,6 +153,10 @@ void MainWindow::setupUi()
     chatDisplay_->setReadOnly(true);
     chatInput_ = new QLineEdit(central);
     chatInput_->setPlaceholderText(QStringLiteral("输入聊天内容，回车发送"));
+    // 监听鼠标按下：首次点击只激活窗口时不落焦点，这里补一次 setFocus。
+    // 不禁用 WA_InputMethodEnabled，保留中文输入能力。
+    chatInput_->installEventFilter(this);
+    installEventFilter(this);   // 监听本窗口 WindowActivate，切回大厅时补焦点
     sendChatBtn_ = new QPushButton(QStringLiteral("发送"), central);
 
     QHBoxLayout *chatRow = new QHBoxLayout;
