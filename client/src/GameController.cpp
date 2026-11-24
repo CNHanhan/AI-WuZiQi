@@ -626,6 +626,20 @@ void GameController::onOfflineGameOver(int result)
                                          : QStringLiteral("平局");
     gameWindow_->endGame(winnerColor, reason, detail);
     setState(InLobby);
+    // 离线对局结束：先展示胜负覆盖层 2.5 秒，再自动回到大厅（而非停在对局/退出）
+    QTimer::singleShot(2500, this, [this]() {
+        if (gameWindow_) gameWindow_->hide();
+        // 离线模式未登录时 mainWindow 无数据也要能返回，统一回大厅
+        if (mainWindow_) {
+            const QString name = userInfo_.username.empty()
+                ? QStringLiteral("游客") : QString::fromStdString(userInfo_.username);
+            mainWindow_->setUserInfo(name, userInfo_.eloScore, userInfo_.wins, userInfo_.coins);
+            centerAndShow(mainWindow_);
+        }
+        requestRoomList();
+        requestPlayerList();
+        emit statusMessage(QStringLiteral("对局结束，已返回大厅"));
+    });
 }
 
 // =============== 消息分派 ===============
