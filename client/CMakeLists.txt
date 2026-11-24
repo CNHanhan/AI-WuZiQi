@@ -7,7 +7,7 @@
 # ============================================================================
 
 cmake_minimum_required(VERSION 3.15)
-project(AI-WuZiQi_Client LANGUAGES CXX)
+project(AI-WuZiQi_Client LANGUAGES CXX RC)   # RC: Windows exe 文件图标
 
 set(CMAKE_CXX_STANDARD 14)          # common 为 C++14，客户端至少兼容 C++11
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -78,6 +78,7 @@ add_executable(AI-WuZiQi_Client
     ${CLIENT_SOURCES}
     ${CLIENT_HEADERS}
     ${CLIENT_RESOURCES}
+    $<$<PLATFORM_ID:Windows>:${CMAKE_CURRENT_SOURCE_DIR}/appicon.rc>
 )
 
 target_include_directories(AI-WuZiQi_Client PRIVATE

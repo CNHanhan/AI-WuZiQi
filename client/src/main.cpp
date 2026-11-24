@@ -4,6 +4,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QIcon>
 
 #include "GameController.h"
 
@@ -13,6 +14,8 @@ int main(int argc, char* argv[])
     QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling, true);
 #endif
     QApplication app(argc, argv);
+    // 应用图标：设置全局默认窗口图标，所有窗口/对话框自动继承（含标题栏与任务栏角标）
+    app.setWindowIcon(QIcon(QStringLiteral(":/appicon.png")));
     QCoreApplication::setApplicationName(QStringLiteral("AI-WuZiQi"));
     QCoreApplication::setApplicationVersion(QStringLiteral("1.0.0"));
     QCoreApplication::setOrganizationName(QStringLiteral("AI-WuZiQi"));

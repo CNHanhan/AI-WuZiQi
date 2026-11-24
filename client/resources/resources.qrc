@@ -1,6 +1,8 @@
 <RCC>
     <qresource prefix="/">
         <file alias="server_cert.fingerprint">server_cert.fingerprint</file>
+        <!-- 应用图标：窗口角标 / 各窗口 setWindowIcon -->
+        <file alias="appicon.png">appicon.png</file>
 
         <!-- 商城商品预览图：别名与 DB t_shop_item.resource_path 的 :/res/... 对齐 -->
         <!-- 棋盘 -->

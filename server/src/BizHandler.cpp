@@ -587,8 +587,10 @@ void BizHandler::handleShopList(IConnection* c, const Message& m) {
     for (const auto& it : items) {
         bool has=false, eq=false;
         for (const auto& o : owned) if (o.itemId == it.itemId) { has=true; eq=o.equipped; break; }
+        // 下发预览图路径（qrc 里的 :/res/... 资源），客户端据此显示商品图
         arr.push_back({{"id", it.itemId}, {"name", it.name}, {"type", it.type},
-                       {"price", it.price}, {"owned", has}, {"equipped", eq}});
+                       {"price", it.price}, {"owned", has}, {"equipped", eq},
+                       {"preview_image", it.resourcePath}});
     }
     reply(c, m, MsgType::SHOP_LIST_RESP, {{"code", ErrCode::OK}, {"items", arr}});
 }

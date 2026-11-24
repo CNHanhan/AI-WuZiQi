@@ -43,6 +43,9 @@ HEADERS += \
 
 RESOURCES += resources/resources.qrc
 
+# Windows exe 文件图标（任务栏/资源管理器角标）
+win32: RC_FILE = appicon.rc
+
 INCLUDEPATH += $$PWD/../common/include
 DEPENDPATH += $$PWD/../common/include
 
