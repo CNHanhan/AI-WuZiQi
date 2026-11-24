@@ -24,6 +24,10 @@
 #include <QDialogButtonBox>
 #include <QInputDialog>
 #include <QStringList>
+#ifdef _WIN32
+#include <windows.h>
+#include <imm.h>
+#endif
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -38,6 +42,13 @@ void MainWindow::showEvent(QShowEvent* event)
     // 从别的窗口切回来（activateWindow 不触发 showEvent）焦点就没了，
     // 且首次 show 时窗口尚未真正激活，setFocus 也会被随后到来的激活事件冲掉。
     // 改用延迟补焦点，让窗口先完成激活再聚焦，保留中文输入法。
+#ifdef _WIN32
+    // 解除窗口级 IME 关联：中文输入法若卡在"中文合成态"会吞掉所有按键，
+    // 表现为"光标在闪但打不进任何字"。解除后键盘消息直达输入框；
+    // 聊天框本身 WA_InputMethodEnabled 保持 true，需要中文时仍可正常输入。
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    if (hwnd) ImmAssociateContext(hwnd, nullptr);
+#endif
     focusChatInput();
 }
 
